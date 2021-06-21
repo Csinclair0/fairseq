@@ -304,7 +304,9 @@ def load_checkpoint_to_cpu(path, arg_overrides=None, load_on_all_ranks=False):
         local_path = PathManager.get_local_path(path)
 
     with open(local_path, "rb") as f:
+        logger.info(f"loading {f}")
         state = torch.load(f, map_location=torch.device("cpu"))
+        logger.info(f"loaded {f}")
 
     if "args" in state and state["args"] is not None and arg_overrides is not None:
         args = state["args"]
