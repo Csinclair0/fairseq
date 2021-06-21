@@ -458,7 +458,7 @@ class Trainer(object):
                     filename, load_on_all_ranks=load_on_all_ranks
                 )
                 last_optim_state = state.get("last_optimizer_state", None)
-
+                logger.info("loaded to cpu")
                 # If doing zero_sharding, do not broadcast global optimizer
                 # state. Later we will broadcast sharded states to each rank
                 # to avoid memory from exploding.
@@ -474,6 +474,7 @@ class Trainer(object):
                 state = None
 
             if is_distributed and not load_on_all_ranks:
+                logger.info("broadcasting object")
                 state = distributed_utils.broadcast_object(
                     state,
                     src_rank=0,
@@ -483,6 +484,7 @@ class Trainer(object):
                 if self.data_parallel_rank > 0:
                     last_optim_state = state.get("last_optimizer_state", None)
 
+            logger.info("loading state dict")
             # load model parameters
             self.model.load_state_dict(
                 state["model"], strict=True, model_cfg=self.cfg.model
@@ -498,6 +500,7 @@ class Trainer(object):
             self._optim_history = state["optimizer_history"]
 
         if last_optim_state is not None and not reset_optimizer:
+            logger.info("building optimizer")
             # rebuild optimizer after loading model, since params may have changed
             self._build_optimizer()
 
