@@ -452,7 +452,7 @@ class Trainer(object):
                 )
                 or getattr(self.cfg.model, "base_layers", 0) > 0
             )
-
+            logger.info(f"load_on_all_rank {load_on_all_ranks} ")
             if load_on_all_ranks or self.data_parallel_rank == 0:
                 state = checkpoint_utils.load_checkpoint_to_cpu(
                     filename, load_on_all_ranks=load_on_all_ranks
