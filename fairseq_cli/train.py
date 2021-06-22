@@ -98,20 +98,21 @@ def main(cfg: FairseqConfig) -> None:
             pt_checkpoint = torch.load(cfg.checkpoint.finetune_from_model)
         else:
             pt_checkpoint = torch.load(cfg.checkpoint.restore_file)
-        added_embeddings = torch.empty(len(universes), 1024)
-        output_projection=torch.empty(len(universes), 1024)
-        torch.nn.init.xavier_normal_(added_embeddings)
-        torch.nn.init.xavier_normal_(output_projection)
-        pt_checkpoint['model']['encoder.embed_tokens.weight'] = torch.cat([pt_checkpoint['model']['encoder.embed_tokens.weight'], added_embeddings])
-        pt_checkpoint['model']['decoder.embed_tokens.weight']= torch.cat([pt_checkpoint['model']['decoder.embed_tokens.weight'], added_embeddings])
-        pt_checkpoint['model']['decoder.output_projection.weight']= torch.cat([pt_checkpoint['model']['decoder.output_projection.weight'], output_projection])
-        
-        if cfg.checkpoint.finetune_from_model is not None:
-            torch.save(pt_checkpoint, cfg.checkpoint.finetune_from_model[:-3]+"_extended.pt")
-            cfg.checkpoint.finetune_from_model = cfg.checkpoint.finetune_from_model[:-3]+"_extended.pt"
-        else:
-            torch.save(pt_checkpoint, cfg.checkpoint.restore_file[:-3]+"_extended.pt")
-            cfg.checkpoint.restore_file = cfg.checkpoint.restore_file[:-3]+"_extended.pt"
+        if pt_checkpoint['model']['encoder.embed_tokens.weight'].size()[0] != 250054 + len(universes):
+            added_embeddings = torch.empty(len(universes), 1024)
+            output_projection=torch.empty(len(universes), 1024)
+            torch.nn.init.xavier_normal_(added_embeddings)
+            torch.nn.init.xavier_normal_(output_projection)
+            pt_checkpoint['model']['encoder.embed_tokens.weight'] = torch.cat([pt_checkpoint['model']['encoder.embed_tokens.weight'], added_embeddings])
+            pt_checkpoint['model']['decoder.embed_tokens.weight']= torch.cat([pt_checkpoint['model']['decoder.embed_tokens.weight'], added_embeddings])
+            pt_checkpoint['model']['decoder.output_projection.weight']= torch.cat([pt_checkpoint['model']['decoder.output_projection.weight'], output_projection])
+            
+            if cfg.checkpoint.finetune_from_model is not None:
+                torch.save(pt_checkpoint, cfg.checkpoint.finetune_from_model[:-3]+"_extended.pt")
+                cfg.checkpoint.finetune_from_model = cfg.checkpoint.finetune_from_model[:-3]+"_extended.pt"
+            else:
+                torch.save(pt_checkpoint, cfg.checkpoint.restore_file[:-3]+"_extended.pt")
+                cfg.checkpoint.restore_file = cfg.checkpoint.restore_file[:-3]+"_extended.pt"
         added_embeddings = len(universes)
 
     if cfg.task._name == "translation_from_pretrained_bart_universe":
