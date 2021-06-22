@@ -98,12 +98,12 @@ def main(cfg: FairseqConfig) -> None:
             pt_checkpoint = torch.load(cfg.checkpoint.finetune_from_model)
         else:
             pt_checkpoint = torch.load(cfg.checkpoint.restore_file)
-        added_embeddings = torch.empty(len(universes), 1024)
+        added_embeddings_matrix = torch.empty(len(universes), 1024)
         output_projection=torch.empty(len(universes), 1024)
-        torch.nn.init.xavier_normal_(added_embeddings)
+        torch.nn.init.xavier_normal_(added_embeddings_matrix)
         torch.nn.init.xavier_normal_(output_projection)
-        pt_checkpoint['model']['encoder.embed_tokens.weight'] = torch.cat([pt_checkpoint['model']['encoder.embed_tokens.weight'], added_embeddings])
-        pt_checkpoint['model']['decoder.embed_tokens.weight']= torch.cat([pt_checkpoint['model']['decoder.embed_tokens.weight'], added_embeddings])
+        pt_checkpoint['model']['encoder.embed_tokens.weight'] = torch.cat([pt_checkpoint['model']['encoder.embed_tokens.weight'], added_embeddings_matrix])
+        pt_checkpoint['model']['decoder.embed_tokens.weight']= torch.cat([pt_checkpoint['model']['decoder.embed_tokens.weight'], added_embeddings_matrix])
         pt_checkpoint['model']['decoder.output_projection.weight']= torch.cat([pt_checkpoint['model']['decoder.output_projection.weight'], output_projection])
         
         
