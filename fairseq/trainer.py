@@ -485,7 +485,7 @@ class Trainer(object):
                 if self.data_parallel_rank > 0:
                     last_optim_state = state.get("last_optimizer_state", None)
 
-            logger.infp("loading state dict")
+            logger.info("loading state dict")
             # load model parameters
             self.model.load_state_dict(
                 state["model"], strict=True, model_cfg=self.cfg.model

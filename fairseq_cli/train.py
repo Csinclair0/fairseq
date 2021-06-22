@@ -93,12 +93,13 @@ def main(cfg: FairseqConfig) -> None:
     if cfg.task._name == "multilingual_denoising_universe":
         with open(cfg.task.universe_dict, 'r+') as univ_file:
             universes = univ_file.readlines()
-        logger.info(f"Extending The Embedding Matrix by {len(universes)}")
+        
         if cfg.checkpoint.finetune_from_model is not None:
             pt_checkpoint = torch.load(cfg.checkpoint.finetune_from_model)
         else:
             pt_checkpoint = torch.load(cfg.checkpoint.restore_file)
         if pt_checkpoint['model']['encoder.embed_tokens.weight'].size()[0] != 250054 + len(universes):
+            logger.info(f"Extending The Embedding Matrix by {len(universes)}")
             added_embeddings = torch.empty(len(universes), 1024)
             output_projection=torch.empty(len(universes), 1024)
             torch.nn.init.xavier_normal_(added_embeddings)
