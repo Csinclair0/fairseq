@@ -454,6 +454,7 @@ class Trainer(object):
             )
 
             if load_on_all_ranks or self.data_parallel_rank == 0:
+                logger.info("loading to cpu")
                 state = checkpoint_utils.load_checkpoint_to_cpu(
                     filename, load_on_all_ranks=load_on_all_ranks
                 )
@@ -474,6 +475,7 @@ class Trainer(object):
                 state = None
 
             if is_distributed and not load_on_all_ranks:
+                logger.info("broadcasting")
                 state = distributed_utils.broadcast_object(
                     state,
                     src_rank=0,
@@ -483,6 +485,7 @@ class Trainer(object):
                 if self.data_parallel_rank > 0:
                     last_optim_state = state.get("last_optimizer_state", None)
 
+            logger.infp("loading state dict")
             # load model parameters
             self.model.load_state_dict(
                 state["model"], strict=True, model_cfg=self.cfg.model
@@ -490,6 +493,7 @@ class Trainer(object):
             # save memory for later steps
             del state["model"]
             if utils.has_parameters(self.get_criterion()):
+                logger.info("getting criterion")
                 self.get_criterion().load_state_dict(
                     state["criterion"], strict=True
                 )
@@ -498,6 +502,7 @@ class Trainer(object):
             self._optim_history = state["optimizer_history"]
 
         if last_optim_state is not None and not reset_optimizer:
+            logger.info("building optimizer")
             # rebuild optimizer after loading model, since params may have changed
             self._build_optimizer()
 
