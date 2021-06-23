@@ -446,6 +446,12 @@ def load_model_ensemble_and_task(
             else:
                 # model parallel checkpoint or unsharded checkpoint
                 model = task.build_model(cfg.model)
+                if arg_overrides.get('embed_length') is not None:
+                    from torch.nn import Embedding, Linear
+                    embed_length = arg_overrides['embed_length'] 
+                    model.encoder.embed_tokens = Embedding(embed_length, 1024)
+                    model.decoder.embed_tokens = Embedding(embed_length, 1024)
+                    model.decoder.output_projection = Linear(1024, embed_length, False)
                 model.load_state_dict(
                     state["model"], strict=strict, model_cfg=cfg.model
                 )
