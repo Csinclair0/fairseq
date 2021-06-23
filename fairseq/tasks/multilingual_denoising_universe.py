@@ -86,7 +86,7 @@ class MultilingualDenoisingUniverseTask(DenoisingTask):
         with open(args.universe_dict, 'r') as univ_file:
             universe_ids = univ_file.readlines()
             for universe in universe_ids:
-                dictionary.add_symbol("[{}]".format(universe))
+                dictionary.add_symbol("[{}]".format(universe.replace('\n', '')))
 
         if not hasattr(args, "shuffle_instance"):
             args.shuffle_instance = False
@@ -173,10 +173,15 @@ class MultilingualDenoisingUniverseTask(DenoisingTask):
                     #        "Dataset not found: {} ({})".format(split, split_path)
                     #    )
 
-                    end_token = (
+                    universe_token = (
                         self.source_dictionary.index("[{}]".format(universe))
                     )
 
+                    end_token = (
+                        self.source_dictionary.index("[{}]".format(language))
+                        if self.args.add_lang_token
+                        else self.source_dictionary.eos()
+                    )
 
                     # create continuous blocks of tokens
                     dataset = TokenBlockDataset(
@@ -187,18 +192,11 @@ class MultilingualDenoisingUniverseTask(DenoisingTask):
                         eos=end_token,
                         break_mode=self.args.sample_break_mode,
                     )
-                    logger.info("loaded {} blocks from: {}".format(len(dataset), split_path))
+                    #logger.info("loaded {} blocks from: {}".format(len(dataset), split_path))
 
                     # prepend beginning-of-sentence token (<s>, equiv. to [CLS] in BERT)
+                    dataset = PrependTokenDataset(dataset, universe_token)
                     dataset = PrependTokenDataset(dataset, self.source_dictionary.bos())
-                    dataset = AppendTokenDataset(dataset, end_token)
-                    
-                    end_token = (
-                        self.source_dictionary.index("[{}]".format(language))
-                        if self.args.add_lang_token
-                        else self.source_dictionary.eos()
-                    )
-                    
                     dataset = AppendTokenDataset(dataset, end_token)
 
                     lang_mask_whole_words = (
