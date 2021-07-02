@@ -127,10 +127,12 @@ def main(cfg: FairseqConfig) -> None:
     model.decoder.embed_tokens = Embedding(embed_length, 1024)
     #model.decoder.output_projection = Linear(1024, embed_length, False)
     # Build model and criterion
+
     if cfg.distributed_training.ddp_backend == "fully_sharded":
         with fsdp_enable_wrap(cfg.distributed_training):
             model.encoder.embed_tokens = fsdp_wrap(model.encoder.embed_tokens)
             model.decoder.embed_tokens = model.encoder.embed_tokens
+            model = fsdp_wrap(model)
 
 
     
