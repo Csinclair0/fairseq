@@ -131,6 +131,7 @@ def main(cfg: FairseqConfig) -> None:
     if cfg.distributed_training.ddp_backend == "fully_sharded":
         with fsdp_enable_wrap(cfg.distributed_training):
             model = fsdp_wrap(task.build_model(cfg.model))
+            #model = task.build_model(cfg.model)
     else: 
         model = task.build_model(cfg.model)
 
