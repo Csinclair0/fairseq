@@ -132,6 +132,8 @@ def main(cfg: FairseqConfig) -> None:
         with fsdp_enable_wrap(cfg.distributed_training):
             #model = fsdp_wrap(task.build_model(cfg.model))
             model = task.build_model(cfg.model)
+            model.encoder_embed_tokens = fsdp_wrap(model.encoder_embed_tokens)
+            model.decoder_embed_tokens = fsdp_wrap(model.decoder_embed_tokens)
     else: 
         model = task.build_model(cfg.model)
 
