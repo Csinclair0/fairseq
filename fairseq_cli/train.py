@@ -134,6 +134,7 @@ def main(cfg: FairseqConfig) -> None:
             model = task.build_model(cfg.model)
             model.encoder.embed_tokens = fsdp_wrap(model.encoder.embed_tokens)
             model.decoder.embed_tokens = fsdp_wrap(model.decoder.embed_tokens)
+            model = fsdp_wrap(model)
     else: 
         model = task.build_model(cfg.model)
 
