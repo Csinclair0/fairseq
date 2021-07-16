@@ -515,7 +515,7 @@ class TranslationTask(FairseqTask):
         model = super().build_model(cfg)
         if self.cfg.eval_bleu:
             detok_args = json.loads(self.cfg.eval_bleu_detok_args)
-            self.tokenizer = encoders.build_tokenizer(
+            self.tokenizer = self.build_bpe(
                 Namespace(tokenizer=self.cfg.eval_bleu_detok, **detok_args)
             )
 
@@ -523,7 +523,6 @@ class TranslationTask(FairseqTask):
             self.sequence_generator = self.build_generator(
                 [model], Namespace(**gen_args)
             )
-            print(self.sequence_generator)
         return model
 
     def valid_step(self, sample, model, criterion):
@@ -611,7 +610,7 @@ class TranslationTask(FairseqTask):
                 # reference, but doesn't get split into multiple tokens.
                 unk_string=("UNKNOWNTOKENINREF" if escape_unk else "UNKNOWNTOKENINHYP"),
             )
-            if self.tokenizer:
+            if self.bpe:
                 s = self.tokenizer.decode(s)
             return s
 

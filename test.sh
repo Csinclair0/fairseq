@@ -16,3 +16,12 @@ fairseq-train /Users/csinclair/src/translation-models-data/data/datasets/process
 --max-update 1000 --validate-interval-updates 1000  --max-tokens-valid 1024 \
 --eval-bleu  --label-smoothing 0.2 --update-freq 2 --arch mbart_large \
 --no-last-checkpoints
+
+
+fairseq-interactive /Users/csinclair/src/translation-models-data/data/datasets/processed/fairseq/mbart/baseline/bin \
+    --path /Users/csinclair/Downloads/mbart50.ft.1n/model.pt \
+  --task translation_from_pretrained_bart \
+  -t es_XX -s en_XX \
+  --langs ar_AR,cs_CZ,de_DE,en_XX,es_XX,et_EE,fi_FI,fr_XX,gu_IN,hi_IN,it_IT,ja_XX,kk_KZ,ko_KR,lt_LT,lv_LV,my_MM,ne_NP,nl_XX,ro_RO,ru_RU,si_LK,tr_TR,vi_VN,zh_CN,af_ZA,az_AZ,bn_IN,fa_IR,he_IL,hr_HR,id_ID,ka_GE,km_KH,mk_MK,ml_IN,mn_MN,mr_IN,pl_PL,ps_AF,pt_XX,sv_SE,sw_KE,ta_IN,te_IN,th_TH,tl_XX,uk_UA,ur_PK,xh_ZA,gl_ES,sl_SI \
+  --bpe 'sentencepiece' --sentencepiece-model /Users/csinclair/Downloads/mbart50.ft.1n/sentence.bpe.model \
+  --sacrebleu --remove-bpe 'sentencepiece' 
