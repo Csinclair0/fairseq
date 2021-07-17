@@ -518,6 +518,7 @@ class TranslationTask(FairseqTask):
             self.tokenizer = self.build_bpe(
                 Namespace(tokenizer=self.cfg.eval_bleu_detok, **detok_args)
             )
+            print(self.tokenizer)
 
             gen_args = json.loads(self.cfg.eval_bleu_args)
             self.sequence_generator = self.build_generator(
@@ -610,7 +611,7 @@ class TranslationTask(FairseqTask):
                 # reference, but doesn't get split into multiple tokens.
                 unk_string=("UNKNOWNTOKENINREF" if escape_unk else "UNKNOWNTOKENINHYP"),
             )
-            if self.tokenizer is not None:
+            if self.tokenizer:
                 s = self.tokenizer.decode(s)
             return s
 
