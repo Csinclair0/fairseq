@@ -610,7 +610,7 @@ class TranslationTask(FairseqTask):
                 # reference, but doesn't get split into multiple tokens.
                 unk_string=("UNKNOWNTOKENINREF" if escape_unk else "UNKNOWNTOKENINHYP"),
             )
-            if self.bpe:
+            if self.tokenizer is not None:
                 s = self.tokenizer.decode(s)
             return s
 
