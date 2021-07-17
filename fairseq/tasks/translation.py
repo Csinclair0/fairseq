@@ -599,7 +599,7 @@ class TranslationTask(FairseqTask):
 
     def _inference_with_bleu(self, generator, sample, model):
         import sacrebleu
-
+        print(self.tokenizer)
         def decode(toks, escape_unk=False):
             s = self.tgt_dict.string(
                 toks.int().cpu(),
