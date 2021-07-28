@@ -178,10 +178,6 @@ def main(cfg: FairseqConfig) -> None:
 
         # train for one epoch
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
-        try:
-            max_bleu = max(max(valid_losses), max_bleu)
-        except:
-            max_bleu = max_bleu
         if should_stop:
             break
 
@@ -195,33 +191,7 @@ def main(cfg: FairseqConfig) -> None:
             # don't cache epoch iterators for sharded datasets
             disable_iterator_cache=task.has_sharded_data("train"),
         )
-    with metrics.aggregate(new_root=True) as agg:
-        stats = get_valid_stats(cfg, trainer, agg.get_smoothed_values())
-    train_meter.stop()
-    logger.info("done training in {:.1f} seconds".format(train_meter.sum))
-    logger.info(f"finished, valid_bleu={stats['best_bleu']},")
-    a = '1' > 0 # to kill training
-    logger.info("testing")
-    if cfg.distributed_training.distributed_rank in [-1, 0]:
-        from torch.utils.tensorboard import SummaryWriter
-        tb_writer = SummaryWriter(log_dir="/opt/tensorboard/hparams")
-        tb_writer.add_hparams(
-            {
-                "lr": base_lr,
-                "update_freq": cfg.optimization.update_freq[0] 
-            },
-            {"bleu": stats['best_bleu']},
-        )
-
-        tb_writer.close()
-        logger.info(f"Done, valid_bleu={stats['best_bleu']},")
-        a = '1' > 0
-        logger.info("testing")
-        raise ValueError # to kill traiing 
-    a = '1' > 0
-    raise ValueError # to kill traiing 
-
-
+    a = '1' > 0 
     # ioPath implementation to wait for all asynchronous file writes to complete.
     if cfg.checkpoint.write_checkpoints_asynchronously:
         logger.info(
