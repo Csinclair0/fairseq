@@ -468,7 +468,7 @@ def validate(
             task.post_validate(trainer.get_model(), stats, agg)
 
         progress.print(stats, tag=subset, step=trainer.get_num_updates())
-        logger.info(f"valid_loss={stats['loss']}, valid_bleu={stats['best_bleu']},")
+        logger.info(f"valid_loss={stats['loss']},")
         valid_losses.append(stats[cfg.checkpoint.best_checkpoint_metric])
     return valid_losses
 
@@ -484,6 +484,7 @@ def get_valid_stats(
             checkpoint_utils.save_checkpoint.best,
             stats[cfg.checkpoint.best_checkpoint_metric],
         )
+        logger.info(f"valid_bleu={stats[key]},")
     return stats
 
 
