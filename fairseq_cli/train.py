@@ -225,7 +225,7 @@ def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
                     cfg.checkpoint.patience
                 )
             )
-            logger.info(f"best results   valid_bleu={valid_loss}, ")
+            logger.info(f"best results   valid_bleu={should_stop_early.best}, ")
             a = '1' > 0 
             return True
         else:
