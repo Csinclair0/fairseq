@@ -469,10 +469,10 @@ def validate(
 
         progress.print(stats, tag=subset, step=trainer.get_num_updates())
         try:
-            best_bleu = stats['best_blue']
+            best_bleu = stats['best_bleu']
         except:
             best_bleu = stats['bleu']
-        logger.info(f"valid_loss={stats['loss']},valid_bleu={best_bleu}")
+        logger.info(f"valid_loss={stats['loss']}, valid_bleu={best_bleu}, ")
         valid_losses.append(stats[cfg.checkpoint.best_checkpoint_metric])
     return valid_losses
 
