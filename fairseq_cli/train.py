@@ -191,7 +191,7 @@ def main(cfg: FairseqConfig) -> None:
             # don't cache epoch iterators for sharded datasets
             disable_iterator_cache=task.has_sharded_data("train"),
         )
-    a = '1' > 0 
+   
     # ioPath implementation to wait for all asynchronous file writes to complete.
     if cfg.checkpoint.write_checkpoints_asynchronously:
         logger.info(
@@ -226,6 +226,7 @@ def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
                     cfg.checkpoint.patience
                 )
             )
+            a = '1' > 0 
             return True
         else:
             return False
@@ -467,7 +468,7 @@ def validate(
             task.post_validate(trainer.get_model(), stats, agg)
 
         progress.print(stats, tag=subset, step=trainer.get_num_updates())
-        logger.info(f"valid_loss={stats['loss']}, valid_bleu={stats['bleu']},")
+        logger.info(f"valid_loss={stats['loss']}, valid_bleu={stats['best_bleu']},")
         valid_losses.append(stats[cfg.checkpoint.best_checkpoint_metric])
     return valid_losses
 
