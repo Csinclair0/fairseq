@@ -199,6 +199,8 @@ def main(cfg: FairseqConfig) -> None:
         stats = get_valid_stats(cfg, trainer, agg.get_smoothed_values())
     train_meter.stop()
     logger.info("done training in {:.1f} seconds".format(train_meter.sum))
+    logger.info(f"Done, valid_bleu={stats['best_bleu']},")
+    raise ValueError # to kill traiing 
     if cfg.distributed_training.distributed_rank in [-1, 0]:
         from torch.utils.tensorboard import SummaryWriter
         tb_writer = SummaryWriter(log_dir="/opt/tensorboard/hparams")
@@ -213,6 +215,7 @@ def main(cfg: FairseqConfig) -> None:
         tb_writer.close()
         logger.info(f"Done, valid_bleu={stats['best_bleu']},")
         a = '1' > 0
+        logger.info("testing")
         raise ValueError # to kill traiing 
     a = '1' > 0
     raise ValueError # to kill traiing 
