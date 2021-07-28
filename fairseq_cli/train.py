@@ -180,7 +180,6 @@ def main(cfg: FairseqConfig) -> None:
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
         if should_stop:
             break
-
         # only use first validation loss to update the learning rate
         lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
 
@@ -226,6 +225,7 @@ def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
                     cfg.checkpoint.patience
                 )
             )
+            logger.info(f"best results   valid_bleu={valid_loss}, ")
             a = '1' > 0 
             return True
         else:
@@ -463,16 +463,11 @@ def validate(
 
         # log validation stats
         stats = get_valid_stats(cfg, trainer, agg.get_smoothed_values())
-
+        logger.info(f"valid_loss={stats['loss']}, valid_bleu={stats['bleu']}, ")
         if hasattr(task, "post_validate"):
             task.post_validate(trainer.get_model(), stats, agg)
 
         progress.print(stats, tag=subset, step=trainer.get_num_updates())
-        try:
-            best_bleu = stats['best_bleu']
-        except:
-            best_bleu = stats['bleu']
-        logger.info(f"valid_loss={stats['loss']}, valid_bleu={best_bleu}, ")
         valid_losses.append(stats[cfg.checkpoint.best_checkpoint_metric])
     return valid_losses
 
