@@ -219,17 +219,16 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         seq_gen_cls=None,
         extra_gen_cls_kwargs=None,
     ):
-        #if not getattr(args, "keep_inference_langtok", False):
-        #    _, tgt_langtok_spec = self.args.langtoks["main"]
-        #    if tgt_langtok_spec:
-        #        tgt_lang_tok = self.data_manager.get_decoder_langtok(
-                    #self.args.target_lang, tgt_langtok_spec
-        #            tgt_langtok_spec
-        #        )
-        #        extra_gen_cls_kwargs = extra_gen_cls_kwargs or {}
-        #        extra_gen_cls_kwargs["symbols_to_strip_from_output"] = {tgt_lang_tok}
-        extra_gen_cls_kwargs ={}
-        extra_gen_cls_kwargs["symbols_to_strip_from_output"] = {self.source_dictionary.index("__{}__".format(x)) for x in self.langs}
+        if not getattr(args, "keep_inference_langtok", False):
+            _, tgt_langtok_spec = self.args.langtoks["main"]
+            if tgt_langtok_spec:
+                tgt_lang_tok = self.data_manager.get_decoder_langtok(
+                    self.args.target_lang, tgt_langtok_spec
+                )
+                extra_gen_cls_kwargs = extra_gen_cls_kwargs or {}
+                extra_gen_cls_kwargs["symbols_to_strip_from_output"] = {tgt_lang_tok}
+        #extra_gen_cls_kwargs ={}
+        #extra_gen_cls_kwargs["symbols_to_strip_from_output"] = {self.source_dictionary.index("__{}__".format(x)) for x in self.langs}
         return super().build_generator(
             models, args, seq_gen_cls=None, extra_gen_cls_kwargs=extra_gen_cls_kwargs
         )
@@ -275,15 +274,18 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         with torch.no_grad():
             _, tgt_langtok_spec = self.args.langtoks["main"]
             if not self.args.lang_tok_replacing_bos_eos:
+            
                 if prefix_tokens is None and tgt_langtok_spec:
-                    #tgt_lang_tok = self.data_manager.get_decoder_langtok(
-                    #    target_lang, tgt_langtok_spec
-                    #)
+                    tgt_lang_tok = self.data_manager.get_decoder_langtok(
+                        self.args.target_lang,  tgt_langtok_spec
+                    )
                     src_tokens = sample["net_input"]["src_tokens"]
                     bsz = src_tokens.size(0)
                     prefix_tokens = (
-                        sample["target"][:, 0].reshape(bsz, 1).to(src_tokens)
+                        torch.LongTensor([[tgt_lang_tok]]).expand(bsz, 1).to(src_tokens)
                     )
+                    print(prefix_tokens)
+                    print(src_tokens)
                 return generator.generate(
                     models,
                     sample,
