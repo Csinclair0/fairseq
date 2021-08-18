@@ -15,18 +15,14 @@ from fairseq.models import (
     register_model,
     register_model_architecture,
 )
-import torch.nn as nn 
 from fairseq.models.fairseq_encoder import EncoderOut
 from fairseq.models.transformer import (
     FairseqEncoderDecoderModel,
-    TransformerDecoder, 
     FairseqEncoder, 
     FairseqIncrementalDecoder
 ) 
 try: 
     from transformers.models.marian.modeling_marian import (
-        MarianEncoder, 
-        MarianDecoder, 
         MarianConfig, 
         MarianMTModel
     )
@@ -73,7 +69,9 @@ class HuggingFaceMarianEncoder(FairseqEncoder):
     def __init__(self, cfg, dictionary):
         super().__init__(dictionary)
         config = MarianConfig.from_pretrained(cfg.common_eval.path)
-        self.model = MarianMTModel.from_pretrained(cfg.common_eval.path).get_encoder()
+        #self.model = MarianMTModel.from_pretrained(cfg.common_eval.path, torchscript= True)
+        self.model = torch.jit.load(cfg.common_eval.path + '/traced_encoder.pt')
+        self.embeds = torch.jit.load(cfg.common_eval.path + '/traced_embeds.pt')
         self.dictionary = dictionary
         self.config = config
         self.padding_idx = dictionary.pad_index
@@ -98,7 +96,6 @@ class HuggingFaceMarianEncoder(FairseqEncoder):
         """
 
         x, embeds, extra = self.extract_features(src_tokens, return_all_hiddens=return_all_hiddens)
-        #logger.info(x.shape)
         # compute padding mask
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
 
@@ -114,12 +111,10 @@ class HuggingFaceMarianEncoder(FairseqEncoder):
         }
 
     def extract_features(self, src_tokens, return_all_hiddens=False, **unused):
-        inputs_embeds = self.model.embed_tokens(src_tokens) * self.model.embed_scale
+
+        inputs_embeds = self.embeds(src_tokens)
         inner_states = self.model(src_tokens)
-        #for x in inner_states:
-        #print("features" , inner_states['last_hidden_state'].shape)
         features = inner_states[0].float()
-        #print(f"encoder_out {features.shape}")
         features = features.transpose(0, 1)
         return features, inputs_embeds, {'inner_states': inner_states[2] if return_all_hiddens else None}
 
@@ -181,11 +176,15 @@ class HuggingFaceMarianDecoder(FairseqIncrementalDecoder):
     def __init__(self, cfg, dictionary):
         super().__init__(dictionary)
         config = MarianConfig.from_pretrained(cfg.common_eval.path)
-        self.model = MarianMTModel.from_pretrained(cfg.common_eval.path)
+        decoder_init = torch.jit.load(cfg.common_eval.path + '/traced_decoder_init.pt')
+        decoder_init.eval()
+        self.model_init = decoder_init
+        decoder = torch.jit.load(cfg.common_eval.path + '/traced_decoder.pt')
+        decoder.eval()
+        self.model = decoder
         self.dictionary = dictionary
         self.config = config
         self.padding_idx = dictionary.pad_index
-
 
     def forward(
         self,
@@ -226,51 +225,49 @@ class HuggingFaceMarianDecoder(FairseqIncrementalDecoder):
         alignment_heads: Optional[int] = None,
     ):
         batch_beam_size, cur_len = prev_output_tokens.shape
+        # don't attend to padding symbols
+        attention_mask = encoder_out['src_tokens'][0].ne(self.padding_idx).int()
+        encoder_out['encoder_out'][0] = encoder_out['encoder_out'][0].transpose(1, 0)
+
         if incremental_state:
             prev_output_tokens = prev_output_tokens[:][:, -1].tolist()
             past = self.get_incremental_state(incremental_state, "past")
             prev_output_tokens = torch.LongTensor([prev_output_tokens]).reshape(5, 1)
+            x = self.model(
+                encoder_out['src_tokens'][0], 
+                attention_mask= attention_mask, 
+                past_key_values=past, 
+                decoder_input_ids=prev_output_tokens,
+                encoder_outputs=encoder_out['encoder_out']
+            )
         else:
-            past = None
             prev_output_tokens = torch.LongTensor([[self.config.pad_token_id]]).expand(5, 1)
+            x = self.model_init(
+                encoder_out['src_tokens'][0], 
+                attention_mask= attention_mask, 
+                decoder_input_ids=prev_output_tokens,
+                encoder_outputs=encoder_out['encoder_out']
+            )
 
-        
-        # don't attend to padding symbols
-        #print(f"src_tokens {encoder_out['src_tokens'][0][0]}")
-        #print(len(encoder_out['encoder_out']))
-        attention_mask = encoder_out['src_tokens'][0].ne(self.padding_idx).int()
-        encoder_out['encoder_out'][0] = encoder_out['encoder_out'][0].transpose(1, 0)
-        #print(f"encoder_out {encoder_out['encoder_out'].shape}")
-        #print(f"encoder_out {encoder_out['encoder_out'][0].transpose(1, 0).shape}")
-        #print(attention_mask)
-        #print(encoder_out['encoder_out'])
-        #print(encoder_out['src_tokens'])
-        #print(f"decoder_input_ids {prev_output_tokens}")
-        #print(prev_output_tokens)
-        x = self.model(
-            encoder_out['src_tokens'][0], 
-            attention_mask= attention_mask, 
-            past_key_values = past, 
-            decoder_input_ids=prev_output_tokens,
-            encoder_outputs=encoder_out['encoder_out']
-        )
 
-        #next_token_logits = x.logits[:, -1, :]
-        next_token_logits = self.adjust_logits_during_generation(x.logits, cur_len=cur_len)
-        #next_token_scores = nn.functional.log_softmax(
-        #        next_token_logits, dim=-1
-        #    ) 
-        #past = self.model._reorder_cache(x.past_key_values, torch.IntTensor([0, cur_len % 2]))
-        #if incremental_state:
-        self.set_incremental_state(incremental_state, "past", x.past_key_values)
+        next_token_logits = self.adjust_logits_during_generation(x[0], cur_len=cur_len)
+        self.set_incremental_state(incremental_state, "past", x[1])
 
         return next_token_logits, None
+
+    def _reorder_cache(self, past, beam_idx):
+        reordered_past = ()
+        for layer_past in past:
+            # cached cross_attention states don't have to be reordered -> they are always the same
+            reordered_past += (
+                tuple(past_state.index_select(0, beam_idx) for past_state in layer_past[:2]) + layer_past[2:],
+            )
+        return reordered_past
 
     def reorder_incremental_state(self, incremental_state: Dict[str, Dict[str, Optional[Tensor]]], new_order: Tensor):
         past = self.get_incremental_state(incremental_state, "past")
         if past is not None:
-            past = self.model._reorder_cache(past, new_order)
-            #if incremental_state:
+            past = self._reorder_cache(past, new_order)
             self.set_incremental_state(incremental_state, "past", past)
             return
         else:
