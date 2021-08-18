@@ -7,13 +7,20 @@
   fairseq-interactive \
   --path 
 
-
-/Users/csinclair/opt/anaconda3/envs/fairseq/bin/fairseq-interactive  wmt19.en-ru.ensemble \
+/Users/csinclair/opt/anaconda3/envs/fairseq/bin/fairseq-interactive mrasp/ \
 --task translation \
---path wmt19.en-ru.ensemble/model1.pt \
+--path mrasp/en2fr_checkpoint.pt \
 --source-lang en \
---target-lang ru \
+--target-lang fr  \
 --beam 5 
+
+
+/Users/csinclair/opt/anaconda3/envs/fairseq/bin/fairseq-interactive  wmt/de/ \
+--task translation \
+--path wmt/de/model.pt \
+--source-lang en \
+--target-lang de \
+--bpe fastbpe --bpe-codes wmt/de/bpecodes --beam 5 --remove-bpe
 
 fairseq-train /Users/csinclair/src/translation-models-data/data/datasets/processed/fairseq/mbart/baseline/bin \
 --decoder-normalize-before --maximize-best-checkpoint-metric \
