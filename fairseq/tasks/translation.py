@@ -113,7 +113,8 @@ def load_langpair_dataset(
             break
 
     assert len(src_datasets) == len(tgt_datasets) or len(tgt_datasets) == 0
-
+    print(len(src_datasets))
+    print(len(tgt_datasets))
     if len(src_datasets) == 1:
         src_dataset = src_datasets[0]
         tgt_dataset = tgt_datasets[0] if len(tgt_datasets) > 0 else None
