@@ -72,6 +72,7 @@ class ConcatDataset(FairseqDataset):
     def sizes(self):
         _dataset_sizes = []
         for ds, sr in zip(self.datasets, self.sample_ratios):
+            print(f"ds {ds}, sr {sr}")
             if isinstance(ds.sizes, np.ndarray):
                 _dataset_sizes.append(np.tile(ds.sizes, sr))
             else:
