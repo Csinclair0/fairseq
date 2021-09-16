@@ -41,7 +41,19 @@ fairseq-train /Users/csinclair/src/translation-models-data/data/datasets/process
 --eval-bleu  --label-smoothing 0.2 --update-freq 1 --arch mbart_large \
 --no-last-checkpoints --eval-bleu-print-samples 
 
-
+fairseq-train /opt/ml/input/data/training \
+--share-all-embeddings --model-arch transformer_wmt_en_de_big \
+--task translation \
+--encoder-learned-pos --decoder-learned-pos \
+--update-freq 8 --log-interval 5 \
+--save-interval-updates 50 \
+--lr 5e-4 --dropout 0.2 \
+--activation-fn gelu \
+--optimizer adam \
+--adam-betas '(0.9, 0.98)' --criterion label_smoothed_cross_entropy \
+--lr-scheduler inverse_sqrt --weight-decay 0.0 \
+--clip-norm 0.0 --warmup-init-lr 1e-07 \
+--label-smoothing 0.1 --fp16 --max-update 100
 
 
 fairseq-train /Users/csinclair/src/translation-models-data/data/datasets/processed/fairseq/mbart/baseline/bin \

@@ -113,14 +113,14 @@ def load_langpair_dataset(
             break
 
     assert len(src_datasets) == len(tgt_datasets) or len(tgt_datasets) == 0
-    print(len(src_datasets))
-    print(len(tgt_datasets))
     if len(src_datasets) == 1:
         src_dataset = src_datasets[0]
         tgt_dataset = tgt_datasets[0] if len(tgt_datasets) > 0 else None
     else:
         sample_ratios = [1] * len(src_datasets)
         sample_ratios[0] = upsample_primary
+        print(upsample_primary)
+        print(sample_ratios)
         src_dataset = ConcatDataset(src_datasets, sample_ratios)
         if len(tgt_datasets) > 0:
             tgt_dataset = ConcatDataset(tgt_datasets, sample_ratios)
