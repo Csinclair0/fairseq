@@ -235,6 +235,7 @@ class TranslationWithLangtokTask(LegacyFairseqTask):
         super().__init__(args)
         self.src_dict = src_dict
         self.tgt_dict = tgt_dict
+        self.autoregressive = True
     
     @classmethod
     def setup_task(cls, args, **kwargs):
