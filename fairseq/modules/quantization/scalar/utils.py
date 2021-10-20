@@ -11,9 +11,9 @@ import torch.nn as nn
 
 from ..pq.utils import attrsetter, get_layers
 from .modules import ActivationQuantizer, IntConv2d, IntEmbedding, IntLinear
-from ... import PositionalEmbedding
+from ... import LearnedPositionalEmbedding
 
-MAPPING = {nn.Linear: IntLinear, nn.Embedding: IntEmbedding, nn.Conv2d: IntConv2d}
+MAPPING = {nn.Linear: IntLinear, nn.Embedding: IntEmbedding, nn.Conv2d: IntConv2d, LearnedPositionalEmbedding: IntEmbedding}
 
 
 def quantize_model_(model, p=0.2, bits=8, update_step=3000, method="histogram", remove_weights=False):
