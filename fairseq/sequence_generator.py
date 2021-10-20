@@ -83,7 +83,7 @@ class SequenceGenerator(nn.Module):
         self.max_len_a = max_len_a
         self.max_len_b = max_len_b
         self.min_len = min_len
-        self.max_len = max_len #or self.model.max_decoder_positions()
+        self.max_len = max_len or self.model.max_decoder_positions()
 
         self.normalize_scores = normalize_scores
         self.len_penalty = len_penalty

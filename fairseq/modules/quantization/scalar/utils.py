@@ -11,7 +11,7 @@ import torch.nn as nn
 
 from ..pq.utils import attrsetter, get_layers
 from .modules import ActivationQuantizer, IntConv2d, IntEmbedding, IntLinear
-
+from ... import PositionalEmbedding
 
 MAPPING = {nn.Linear: IntLinear, nn.Embedding: IntEmbedding, nn.Conv2d: IntConv2d}
 
@@ -54,21 +54,20 @@ def quantize_model_(model, p=0.2, bits=8, update_step=3000, method="histogram", 
             "method": method,
             "counter": 0,
         }
-        try:
-            # instantiate the quantized counterpart
-            if isinstance(module, tuple(MAPPING.keys())):
-                QuantizedModule = MAPPING[module.__class__]
-                quantized_module = QuantizedModule.__new__(QuantizedModule)
-                params = module.__dict__
-                params.update(q_params)
-                quantized_module.__dict__.update(params)
 
-            else:
-                if is_master_process:
-                    logging.info(f"Module {module} not yet supported for quantization")
-                continue
-        except: 
-            logging.info(f"Module {module} not yet supported for quantization")
+        # instantiate the quantized counterpart
+        if isinstance(module, tuple(MAPPING.keys())):
+            QuantizedModule = MAPPING[module.__class__]
+            quantized_module = QuantizedModule.__new__(QuantizedModule)
+            params = module.__dict__
+            params.update(q_params)
+            quantized_module.__dict__.update(params)
+
+        else:
+            if is_master_process:
+                logging.info(f"Module {module} not yet supported for quantization")
+            continue
+
 
         # activation quantization
         a_q = ActivationQuantizer(quantized_module, p=0, bits=bits, method=method)
