@@ -97,6 +97,7 @@ def main(cfg: FairseqConfig) -> None:
         model = task.build_model(cfg.model)
     criterion = task.build_criterion(cfg.criterion)
     logger.info(model)
+    model.cuda()
     logger.info("task: {}".format(task.__class__.__name__))
     logger.info("model: {}".format(model.__class__.__name__))
     logger.info("criterion: {}".format(criterion.__class__.__name__))

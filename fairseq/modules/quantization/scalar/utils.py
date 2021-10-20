@@ -57,7 +57,6 @@ def quantize_model_(model, p=0.2, bits=8, update_step=3000, method="histogram", 
 
         # instantiate the quantized counterpart
         if isinstance(module, tuple(MAPPING.keys())):
-            print(module)
             QuantizedModule = MAPPING[module.__class__]
             quantized_module = QuantizedModule.__new__(QuantizedModule)
             params = module.__dict__
