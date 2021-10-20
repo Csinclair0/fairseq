@@ -920,6 +920,10 @@ class GenerationConfig(FairseqDataclass):
         default=False,
         metadata={"help": "if set, dont use seed for initializing random generators"},
     )
+    quantize: bool = field(
+        default=False, 
+        metadata={"help": "whether to quantize the model before gneration"}
+    )
 
 
 @dataclass

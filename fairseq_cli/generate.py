@@ -132,6 +132,10 @@ def _main(cfg: DictConfig, output_file):
         if use_cuda and not cfg.distributed_training.pipeline_model_parallel:
             model.cuda()
         model.prepare_for_inference_(cfg)
+        if cfg.generation.quantize:
+            torch.quantization.quantize_dynamic(
+                model, {torch.nn.Linear}, dtype=torch.qint8, inplace=True
+            )
 
     # Load alignment dictionary for unknown word replacement
     # (None if no unknown word replacement, empty if no path to align dictionary)
