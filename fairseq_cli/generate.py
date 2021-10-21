@@ -123,8 +123,10 @@ def _main(cfg: DictConfig, output_file):
     else:
         lms = [None]
 
+    logger.info(models)
     # Optimize ensemble for generation
     for model in chain(models, lms):
+        logger.info(model)
         if model is None:
             continue
         if cfg.common.fp16:
