@@ -132,8 +132,10 @@ def _main(cfg: DictConfig, output_file):
         if use_cuda and not cfg.distributed_training.pipeline_model_parallel:
             model.cuda()
         model.prepare_for_inference_(cfg)
+        logger.info(cfg.generation)
+        logger.info(cfg.generation.quantize)
         if cfg.generation.quantize:
-            print("quantizing model")
+            logger.info("quantizing model")
             torch.quantization.quantize_dynamic(
                 model, {torch.nn.Linear}, dtype=torch.qint8, inplace=True
             )
