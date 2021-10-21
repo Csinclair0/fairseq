@@ -133,6 +133,7 @@ def _main(cfg: DictConfig, output_file):
             model.cuda()
         model.prepare_for_inference_(cfg)
         if cfg.generation.quantize:
+            print("quantizing model")
             torch.quantization.quantize_dynamic(
                 model, {torch.nn.Linear}, dtype=torch.qint8, inplace=True
             )
