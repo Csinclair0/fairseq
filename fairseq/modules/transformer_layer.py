@@ -408,7 +408,7 @@ class TransformerDecoderLayerBase(nn.Module):
                 key_padding_mask=encoder_padding_mask,
                 incremental_state=incremental_state,
                 static_kv=True,
-                need_weights=need_attn or (not self.training and self.need_attn),
+                need_weights=need_attn or (not self.training and need_attn),
                 need_head_weights=need_head_weights,
             )
             x = self.dropout_module(x)
