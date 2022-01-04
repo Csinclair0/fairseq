@@ -43,7 +43,7 @@ from fairseq.trainer import Trainer
 def main(cfg: FairseqConfig) -> None:
     if isinstance(cfg, argparse.Namespace):
         cfg = convert_namespace_to_omegaconf(cfg)
-
+    base_lr = cfg.optimization.lr[-1]
     utils.import_user_module(cfg.common)
 
     if (
@@ -172,7 +172,7 @@ def main(cfg: FairseqConfig) -> None:
 
     max_epoch = cfg.optimization.max_epoch or math.inf
     lr = trainer.get_lr()
-
+    max_bleu = 0
     train_meter = meters.StopwatchMeter()
     train_meter.start()
     while epoch_itr.next_epoch_idx <= max_epoch:
@@ -186,6 +186,10 @@ def main(cfg: FairseqConfig) -> None:
 
         # train for one epoch
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
+        try:
+            max_bleu = max(max(valid_losses), max_bleu)
+        except:
+            max_bleu = max_bleu
         if should_stop:
             break
 
@@ -199,8 +203,29 @@ def main(cfg: FairseqConfig) -> None:
             # don't cache epoch iterators for sharded datasets
             disable_iterator_cache=task.has_sharded_data("train"),
         )
+    logger.info(metrics)
+    with metrics.aggregate(new_root=True) as agg:
+        stats = get_valid_stats(cfg, trainer, agg.get_smoothed_values())
     train_meter.stop()
     logger.info("done training in {:.1f} seconds".format(train_meter.sum))
+    if cfg.distributed_training.distributed_rank in [-1, 0]:
+        from torch.utils.tensorboard import SummaryWriter
+        tb_writer = SummaryWriter(log_dir="/opt/tensorboard/hparams")
+        tb_writer.add_hparams(
+            {
+                "lr": base_lr,
+                "update_freq": cfg.optimization.update_freq[0] 
+            },
+            {"bleu": stats['best_bleu']},
+        )
+
+        tb_writer.close()
+        logger.info(f"Done, valid_bleu={stats['best_bleu']},")
+        a = '1' > 0
+        raise ValueError # to kill traiing 
+    a = '1' > 0
+    raise ValueError # to kill traiing 
+
 
     # ioPath implementation to wait for all asynchronous file writes to complete.
     if cfg.checkpoint.write_checkpoints_asynchronously:
@@ -210,6 +235,7 @@ def main(cfg: FairseqConfig) -> None:
         )
         PathManager.async_close()
         logger.info("ioPath PathManager finished waiting.")
+    
 
 
 def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
@@ -308,7 +334,7 @@ def train(
             if num_updates % cfg.common.log_interval == 0:
                 stats = get_training_stats(metrics.get_smoothed_values("train_inner"))
                 progress.log(stats, tag="train_inner", step=num_updates)
-                logger.info(f"train_loss={stats['loss']};")
+                logger.info(f"train_loss={stats['loss']},")
                 # reset mid-epoch stats after each log interval
                 # the end-of-epoch stats will still be preserved
                 metrics.reset_meters("train_inner")
@@ -487,7 +513,7 @@ def validate(
             task.post_validate(trainer.get_model(), stats, agg)
 
         progress.print(stats, tag=subset, step=trainer.get_num_updates())
-        logger.info(f"valid_loss={stats['loss']}")
+        logger.info(f"valid_loss={stats['loss']}, valid_bleu={stats['bleu']}, ")
         valid_losses.append(stats[cfg.checkpoint.best_checkpoint_metric])
     return valid_losses
 
@@ -496,6 +522,7 @@ def get_valid_stats(
     cfg: DictConfig, trainer: Trainer, stats: Dict[str, Any]
 ) -> Dict[str, Any]:
     stats["num_updates"] = trainer.get_num_updates()
+    logger.info(stats)
     if hasattr(checkpoint_utils.save_checkpoint, "best"):
         key = "best_{0}".format(cfg.checkpoint.best_checkpoint_metric)
         best_function = max if cfg.checkpoint.maximize_best_checkpoint_metric else min
@@ -529,7 +556,7 @@ def cli_main(
 
     # if cfg.common.use_plasma_view:
     #     server.server.kill()
-
+    
 
 if __name__ == "__main__":
     cli_main()

@@ -203,7 +203,7 @@ class SequenceGenerator(nn.Module):
             ],
         )
         net_input = sample["net_input"]
-
+        #print(net_input)
         if "src_tokens" in net_input:
             src_tokens = net_input["src_tokens"]
             # length of the source text being the character length except EndOfSentence and pad
@@ -257,7 +257,9 @@ class SequenceGenerator(nn.Module):
         # compute the encoder output for each beam
         with torch.autograd.profiler.record_function("EnsembleModel: forward_encoder"):
             encoder_outs = self.model.forward_encoder(net_input)
-
+        #print(encoder_outs[0])
+        #print(f"transposed {encoder_outs[0]['encoder_out'][0].shape}")
+        #print(encoder_outs[0]['encoder_embedding'][0].shape)
         # placeholder of indices for bsz * beam_size to hold tokens and accumulative scores
         new_order = torch.arange(bsz).view(-1, 1).repeat(1, beam_size).view(-1)
         new_order = new_order.to(src_tokens.device).long()
@@ -342,7 +344,7 @@ class SequenceGenerator(nn.Module):
                     incremental_states,
                     self.temperature,
                 )
-
+            #print(lprobs.shape)
             if self.lm_model is not None:
                 lm_out = self.lm_model(tokens[:, : step + 1])
                 probs = self.lm_model.get_normalized_probs(
@@ -350,6 +352,18 @@ class SequenceGenerator(nn.Module):
                 )
                 probs = probs[:, -1, :] * self.lm_weight
                 lprobs += probs
+
+
+            lprobs[lprobs != lprobs] = torch.tensor(-math.inf).to(lprobs)
+
+            lprobs[:, self.pad] = -math.inf  # never select pad
+            lprobs[:, self.unk] -= self.unk_penalty  # apply unk penalty
+
+            # handle max length constraint
+            if step >= max_len:
+                lprobs[:, : self.eos] = -math.inf
+                lprobs[:, self.eos + 1 :] = -math.inf
+
             # handle prefix tokens (possibly with different lengths)
             if (
                 prefix_tokens is not None
@@ -784,6 +798,7 @@ class EnsembleModel(nn.Module):
         log_probs = []
         avg_attn: Optional[Tensor] = None
         encoder_out: Optional[Dict[str, List[Tensor]]] = None
+
         for i, model in enumerate(self.models):
             if self.has_encoder():
                 encoder_out = encoder_outs[i]
@@ -813,7 +828,6 @@ class EnsembleModel(nn.Module):
                         attn = attn_holder[0]
                 if attn is not None:
                     attn = attn[:, -1, :]
-
             decoder_out_tuple = (
                 decoder_out[0][:, -1:, :].div_(temperature),
                 None if decoder_len <= 1 else decoder_out[1],
