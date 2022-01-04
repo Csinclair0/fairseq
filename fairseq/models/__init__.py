@@ -10,7 +10,7 @@ import os
 from contextlib import ExitStack
 
 from fairseq.dataclass import FairseqDataclass
-from fairseq.dataclass.utils import merge_with_parent, populate_dataclass
+from fairseq.dataclass.utils import merge_with_parent
 from hydra.core.config_store import ConfigStore
 from omegaconf import open_dict, OmegaConf
 
@@ -84,7 +84,7 @@ def build_model(cfg: FairseqDataclass, task):
         dc = MODEL_DATACLASS_REGISTRY[model_type]
 
         if isinstance(cfg, argparse.Namespace):
-            cfg = populate_dataclass(dc(), cfg)
+            cfg = dc.from_namespace(cfg)
         else:
             cfg = merge_with_parent(dc(), cfg)
     else:
@@ -98,9 +98,7 @@ def build_model(cfg: FairseqDataclass, task):
 
     assert model is not None, (
         f"Could not infer model type from {cfg}. "
-        "Available models: {}".format(
-            MODEL_DATACLASS_REGISTRY.keys()
-        )
+        "Available models: {}".format(MODEL_DATACLASS_REGISTRY.keys())
         + f" Requested model type: {model_type}"
     )
 

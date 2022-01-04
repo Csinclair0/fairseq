@@ -8,6 +8,7 @@ import contextlib
 import copy
 import math
 import numpy as np
+import re
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -65,6 +66,19 @@ class Wav2Vec2AsrConfig(FairseqDataclass):
             "help": "dropout probability after activation in FFN inside wav2vec 2.0 model"
         },
     )
+    conv_feature_layers: Optional[str] = field(
+        default="[(512, 10, 5)] + [(512, 3, 2)] * 4 + [(512,2,2)] + [(512,2,2)]",
+        metadata={
+            "help": (
+                "string describing convolutional feature extraction "
+                "layers in form of a python list that contains "
+                "[(dim, kernel_size, stride), ...]"
+            ),
+        },
+    )
+    encoder_embed_dim: Optional[int] = field(
+        default=768, metadata={"help": "encoder embedding dimension"}
+    )
 
     # masking
     apply_mask: bool = field(
@@ -91,6 +105,10 @@ class Wav2Vec2AsrConfig(FairseqDataclass):
     )
     no_mask_overlap: bool = field(
         default=False, metadata={"help": "whether to allow masks to overlap"}
+    )
+    mask_min_space: Optional[int] = field(
+        default=1,
+        metadata={"help": "min space between spans (if no overlap is enabled)"},
     )
 
     # channel masking
@@ -123,38 +141,44 @@ class Wav2Vec2AsrConfig(FairseqDataclass):
     layerdrop: float = field(
         default=0.0, metadata={"help": "probability of dropping a layer in wav2vec 2.0"}
     )
+    mask_channel_min_space: Optional[int] = field(
+        default=1,
+        metadata={"help": "min space between spans (if no overlap is enabled)"},
+    )
     mask_channel_before: bool = False
     normalize: bool = II("task.normalize")
     data: str = II("task.data")
     # this holds the loaded wav2vec args
     w2v_args: Any = None
+    checkpoint_activations: bool = field(
+        default=False, metadata={"help": "checkpoint_activations"}
+    )
+    offload_activations: bool = field(
+        default=False, metadata={"help": "offload_activations"}
+    )
+    min_params_to_wrap: int = field(
+        default=int(1e8),
+        metadata={
+            "help": "minimum number of params for a layer to be wrapped with FSDP() when "
+                    "training with --ddp-backend=fully_sharded. Smaller values will "
+                    "improve memory efficiency, but may make torch.distributed "
+                    "communication less efficient due to smaller input sizes. This option "
+                    "is set to 0 (i.e., always wrap) when --checkpoint-activations or "
+                    "--offload-activations are passed."
+        },
+    )
+
+    checkpoint_activations: bool = field(
+        default=False,
+        metadata={"help": "recompute activations and save memory for extra compute"},
+    )
+    ddp_backend: str = II("distributed_training.ddp_backend")
 
 
 @dataclass
 class Wav2Vec2CtcConfig(Wav2Vec2AsrConfig):
     blank_weight: float = 0
     blank_mode: str = "add"
-    mask_min_space: Optional[int] = field(
-        default=1,
-        metadata={"help": "min space between spans (if no overlap is enabled)"},
-    )
-    mask_channel_min_space: Optional[int] = field(
-        default=1,
-        metadata={"help": "min space between spans (if no overlap is enabled)"},
-    )
-    conv_feature_layers: Optional[str] = field(
-        default="[(512, 10, 5)] + [(512, 3, 2)] * 4 + [(512,2,2)] + [(512,2,2)]",
-        metadata={
-            "help": (
-                "string describing convolutional feature extraction "
-                "layers in form of a python list that contains "
-                "[(dim, kernel_size, stride), ...]"
-            ),
-        },
-    )
-    encoder_embed_dim: Optional[int] = field(
-        default=768, metadata={"help": "encoder embedding dimension"}
-    )
 
 
 @register_model("wav2vec_ctc", dataclass=Wav2Vec2CtcConfig)
@@ -187,8 +211,12 @@ class Wav2VecCtc(BaseFairseqModel):
                 raise Exception(f"invalid blank mode {self.blank_mode}")
 
         if net_output["padding_mask"] is not None and net_output["padding_mask"].any():
-            logits[net_output["padding_mask"].T][..., 0] = float("inf")
-            logits[net_output["padding_mask"].T][..., 1:] = float("-inf")
+            number_of_classes = logits.size(-1)
+            masking_tensor = torch.ones(
+                number_of_classes, device=logits.device
+            ) * float("-inf")
+            masking_tensor[0] = 0
+            logits[net_output["padding_mask"].T] = masking_tensor.type_as(logits)
 
         if normalize:
             logits = utils.log_softmax(logits.float(), dim=-1)
@@ -299,7 +327,7 @@ class Wav2Vec2Seq2SeqModel(FairseqEncoderDecoderModel):
         return TransformerDecoder(cfg, tgt_dict, embed_tokens)
 
     def forward(self, **kwargs):
-        encoder_out = self.encoder(tbc=False, **kwargs)
+        encoder_out = self.encoder(**kwargs)
         decoder_out = self.decoder(encoder_out=encoder_out, **kwargs)
         return decoder_out
 
@@ -330,6 +358,9 @@ class Wav2VecEncoder(FairseqEncoder):
             "no_mask_channel_overlap": cfg.no_mask_channel_overlap,
             "encoder_layerdrop": cfg.layerdrop,
             "feature_grad_mult": cfg.feature_grad_mult,
+            "checkpoint_activations": cfg.checkpoint_activations,
+            "offload_activations": cfg.offload_activations,
+            "min_params_to_wrap": cfg.min_params_to_wrap,
         }
 
         if cfg.w2v_args is None:
@@ -351,12 +382,16 @@ class Wav2VecEncoder(FairseqEncoder):
             "Please check that --normalize is set or unset for both pre-training and here"
         )
 
+        if hasattr(cfg, "checkpoint_activations") and cfg.checkpoint_activations:
+            with open_dict(w2v_args):
+                w2v_args.model.checkpoint_activations = cfg.checkpoint_activations
+
         w2v_args.task.data = cfg.data
         task = tasks.setup_task(w2v_args.task)
         model = task.build_model(w2v_args.model)
 
         if state is not None and not cfg.no_pretrained_weights:
-            model.load_state_dict(state["model"], strict=True)
+            self.load_model_weights(state, model, cfg)
 
         model.remove_pretraining_modules()
 
@@ -381,12 +416,44 @@ class Wav2VecEncoder(FairseqEncoder):
         if targ_d is not None:
             self.proj = Linear(d, targ_d)
 
+    def load_model_weights(self, state, model, cfg):
+        if cfg.ddp_backend == "fully_sharded":
+            from fairseq.distributed import FullyShardedDataParallel
+
+            for name, module in model.named_modules():
+                if "encoder.layers" in name and len(name.split(".")) == 3:
+                    # Only for layers, we do a special handling and load the weights one by one
+                    # We dont load all weights together as that wont be memory efficient and may
+                    # cause oom
+                    new_dict = {
+                        k.replace(name + ".", ""): v
+                        for (k, v) in state["model"].items()
+                        if name + "." in k
+                    }
+                    assert isinstance(module, FullyShardedDataParallel)
+                    with module.summon_full_params():
+                        module.load_state_dict(new_dict, strict=True)
+                    module._reset_lazy_init()
+
+            # Once layers are loaded, filter them out and load everything else.
+            r = re.compile("encoder.layers.\d.")
+            filtered_list = list(filter(r.match, state["model"].keys()))
+
+            new_big_dict = {
+                k: v for (k, v) in state["model"].items() if k not in filtered_list
+            }
+
+            model.load_state_dict(new_big_dict, strict=False)
+        else:
+            model.load_state_dict(state["model"], strict=True)
+
     def set_num_updates(self, num_updates):
         """Set the number of parameters updates."""
         super().set_num_updates(num_updates)
         self.num_updates = num_updates
 
-    def forward(self, source, padding_mask, tbc=True, **kwargs):
+    def forward(self, source, padding_mask, **kwargs):
+
         w2v_args = {
             "source": source,
             "padding_mask": padding_mask,
@@ -401,9 +468,8 @@ class Wav2VecEncoder(FairseqEncoder):
             x = res["x"]
             padding_mask = res["padding_mask"]
 
-            if tbc:
-                # BTC -> TBC
-                x = x.transpose(0, 1)
+            # B x T x C -> T x B x C
+            x = x.transpose(0, 1)
 
         x = self.final_dropout(x)
 
@@ -412,22 +478,25 @@ class Wav2VecEncoder(FairseqEncoder):
 
         return {
             "encoder_out": x,  # T x B x C
-            "encoder_padding_mask": padding_mask.transpose(0, 1)
-            if padding_mask is not None
-            else None,  # T x B
-            "padding_mask": padding_mask,
+            "padding_mask": padding_mask,  # B x T,
             "layer_results": res["layer_results"],
         }
+
+    def forward_torchscript(self, net_input):
+        if torch.jit.is_scripting():
+            return self.forward(net_input["source"], net_input["padding_mask"])
+        else:
+            return self.forward_non_torchscript(net_input)
 
     def reorder_encoder_out(self, encoder_out, new_order):
         if encoder_out["encoder_out"] is not None:
             encoder_out["encoder_out"] = encoder_out["encoder_out"].index_select(
                 1, new_order
             )
-        if encoder_out["encoder_padding_mask"] is not None:
-            encoder_out["encoder_padding_mask"] = encoder_out[
-                "encoder_padding_mask"
-            ].index_select(0, new_order)
+        if encoder_out["padding_mask"] is not None:
+            encoder_out["padding_mask"] = encoder_out["padding_mask"].index_select(
+                0, new_order
+            )
         return encoder_out
 
     def max_positions(self):
@@ -469,7 +538,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         self.layerdrop = cfg.decoder_layerdrop
 
-        padding_idx = embed_tokens.padding_idx
+        self.padding_idx = embed_tokens.padding_idx
         self.max_target_positions = cfg.max_target_positions
 
         self.embed_tokens = embed_tokens
@@ -485,7 +554,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             PositionalEmbedding(
                 cfg.max_target_positions,
                 embed_dim,
-                padding_idx,
+                self.padding_idx,
                 learned=cfg.decoder_learned_pos,
             )
             if not cfg.no_token_positional_embeddings
@@ -589,6 +658,9 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         inner_states = [x]
 
         # decoder layers
+        self_attn_padding_mask = None
+        if prev_output_tokens.eq(self.padding_idx).any():
+            self_attn_padding_mask = prev_output_tokens.eq(self.padding_idx)
         for layer in self.layers:
             dropout_probability = np.random.random()
             if not self.training or (dropout_probability > self.layerdrop):
@@ -600,6 +672,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                     self_attn_mask=self.buffered_future_mask(x)
                     if incremental_state is None
                     else None,
+                    self_attn_padding_mask=self_attn_padding_mask,
                 )
                 inner_states.append(x)
 

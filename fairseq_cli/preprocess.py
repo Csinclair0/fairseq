@@ -41,6 +41,10 @@ def main(args):
     )
     logger.info(args)
 
+    assert (
+        args.dataset_impl != "huffman"
+    ), "preprocessing.py doesn't support Huffman yet, use HuffmanCodeBuilder directly."
+
     task = tasks.get_task(args.task)
 
     def train_path(lang):

@@ -22,6 +22,7 @@ from fairseq.models.transformer import DEFAULT_MIN_PARAMS_TO_WRAP, TransformerEn
 from fairseq.modules import LayerNorm
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
 from fairseq.modules.transformer_sentence_encoder import init_bert_params
+from fairseq.utils import safe_getattr, safe_hasattr
 
 from .hub_interface import RobertaHubInterface
 
@@ -182,7 +183,24 @@ class RobertaModel(FairseqEncoderModel):
                 "communication less efficient due to smaller input sizes. This option "
                 "is set to 0 (i.e., always wrap) when --checkpoint-activations or "
                 "--offload-activations are passed."
-            )
+            ),
+        )
+        # args for AdaPruning
+        # In short, it adds regularizarion for the multihead attention module and feed forward neural nets
+        # For more details, please refer to the paper https://openreview.net/forum?id=_CMSV7FTzGI
+        parser.add_argument(
+            "--mha-reg-scale-factor",
+            type=float,
+            metavar="D",
+            default=0.0,
+            help="scaling factor for regularization term in adptive pruning, recommendation is 0.000375",
+        )
+        parser.add_argument(
+            "--ffn-reg-scale-factor",
+            type=float,
+            metavar="D",
+            default=0.0,
+            help="scaling factor for regularization term in adptive pruning, recommendation is 0.000375",
         )
 
     @classmethod
@@ -197,8 +215,8 @@ class RobertaModel(FairseqEncoderModel):
         # make sure all arguments are present
         base_architecture(args)
 
-        if not hasattr(args, "max_positions"):
-            if not hasattr(args, "tokens_per_sample"):
+        if not safe_hasattr(args, "max_positions"):
+            if not safe_hasattr(args, "tokens_per_sample"):
                 args.tokens_per_sample = task.max_positions()
             args.max_positions = args.tokens_per_sample
 
@@ -225,6 +243,29 @@ class RobertaModel(FairseqEncoderModel):
         if classification_head_name is not None:
             x = self.classification_heads[classification_head_name](x)
         return x, extra
+
+    def _get_adaptive_head_loss(self):
+        norm_loss = 0
+        scaling = float(self.args.mha_reg_scale_factor)
+        for layer in self.encoder.sentence_encoder.layers:
+            norm_loss_layer = 0
+            for i in range(layer.self_attn.num_heads):
+                start_idx = i * layer.self_attn.head_dim
+                end_idx = (i + 1) * layer.self_attn.head_dim
+                norm_loss_layer += scaling * (torch.sum(torch.abs(layer.self_attn.q_proj.weight[start_idx:end_idx, ])) + torch.sum(torch.abs(layer.self_attn.q_proj.bias[start_idx:end_idx])))
+                norm_loss_layer += scaling * (torch.sum(torch.abs(layer.self_attn.k_proj.weight[start_idx:end_idx, ])) + torch.sum(torch.abs(layer.self_attn.k_proj.bias[start_idx:end_idx])))
+                norm_loss_layer += scaling * (torch.sum(torch.abs(layer.self_attn.v_proj.weight[start_idx:end_idx, ])) + torch.sum(torch.abs(layer.self_attn.v_proj.bias[start_idx:end_idx])))
+
+            norm_loss += norm_loss_layer
+        return norm_loss
+
+    def _get_adaptive_ffn_loss(self):
+        ffn_scale_factor = float(self.args.ffn_reg_scale_factor)
+        filter_loss = 0
+        for layer in self.encoder.sentence_encoder.layers:
+            filter_loss += torch.sum(torch.abs(layer.fc1.weight * ffn_scale_factor)) + torch.sum(torch.abs(layer.fc2.weight * ffn_scale_factor))
+            filter_loss += torch.sum(torch.abs(layer.fc1.bias * ffn_scale_factor)) + torch.sum(torch.abs(layer.fc2.bias * ffn_scale_factor))
+        return filter_loss
 
     def get_normalized_probs(self, net_output, log_probs, sample=None):
         """Get normalized probabilities (or log probs) from a net's output."""
@@ -519,14 +560,6 @@ class RobertaEncoder(FairseqEncoder):
         return self.args.max_positions
 
 
-def safe_getattr(obj, k, default=None):
-    from omegaconf import OmegaConf
-
-    if OmegaConf.is_config(obj):
-        return obj[k] if k in obj and obj[k] is not None else default
-
-    return getattr(obj, k, default)
-
 @register_model_architecture("roberta", "roberta")
 def base_architecture(args):
     args.encoder_layers = safe_getattr(args, "encoder_layers", 12)
@@ -549,7 +582,9 @@ def base_architecture(args):
     args.layernorm_embedding = safe_getattr(args, "layernorm_embedding", True)
     args.no_scale_embedding = safe_getattr(args, "no_scale_embedding", True)
     args.activation_fn = safe_getattr(args, "activation_fn", "gelu")
-    args.encoder_normalize_before = safe_getattr(args, "encoder_normalize_before", False)
+    args.encoder_normalize_before = safe_getattr(
+        args, "encoder_normalize_before", False
+    )
     args.pooler_activation_fn = safe_getattr(args, "pooler_activation_fn", "tanh")
     args.untie_weights_roberta = safe_getattr(args, "untie_weights_roberta", False)
 

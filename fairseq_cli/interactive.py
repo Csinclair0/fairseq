@@ -27,7 +27,6 @@ from fairseq.dataclass.utils import convert_namespace_to_omegaconf
 from fairseq.token_generation_constraints import pack_constraints, unpack_constraints
 from fairseq_cli.generate import get_symbols_to_strip_from_output
 
-
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -264,7 +263,7 @@ def main(cfg: FairseqConfig):
 
         # sort output to match input order
         for id_, src_tokens, hypos, info in sorted(results, key=lambda x: x[0]):
-            src_str = ''
+            src_str = ""
             if src_dict is not None:
                 src_str = src_dict.string(src_tokens, cfg.common_eval.post_process)
                 print("S-{}\t{}".format(id_, src_str))
@@ -272,7 +271,8 @@ def main(cfg: FairseqConfig):
                 for constraint in info["constraints"]:
                     print(
                         "C-{}\t{}".format(
-                            id_, tgt_dict.string(constraint, cfg.common_eval.post_process)
+                            id_,
+                            tgt_dict.string(constraint, cfg.common_eval.post_process),
                         )
                     )
 
