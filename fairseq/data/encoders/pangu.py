@@ -19,9 +19,15 @@ class PanguTokenizerConfig(FairseqDataclass):
 class PanguTokenizer(object):
     def __init__(self, cfg: PanguTokenizerConfig):
         self.cfg = cfg
+        try: 
+            import jieba
+            self.jieba = jieba
+        except:
+            raise ImportError
+        
 
     def encode(self, text: str) -> str:
-        return text
+        return ' '.join(jieba.cut(string))
 
     def decode(self, text: str) -> str:
         text = spacing(RE_WS_IN_FW.sub(r'\1', text)).strip()
