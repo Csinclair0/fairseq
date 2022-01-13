@@ -8,7 +8,7 @@ import re
 @dataclass
 class KyteaTokenizerConfig(FairseqDataclass):
     model_file: str = field(default="en", metadata={"help": "where is the model file located"})
-    decode_only: bool = field(default = True,  metadata={"help": "detokenize only"})
+    decode_only: bool = field(default = False,  metadata={"help": "detokenize only"})
     encode_only: bool = field(default = False,  metadata={"help": "tokenize only"})
 
 
@@ -73,4 +73,5 @@ class KyteaTokenizer(object):
             return text
         res = chinese_deseg(text.split(" "))
         res = re.sub(r" +", u" ", res)
+        res = ''.join(res.split())
         return res
