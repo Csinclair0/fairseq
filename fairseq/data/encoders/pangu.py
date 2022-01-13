@@ -27,7 +27,7 @@ class PanguTokenizer(object):
         
 
     def encode(self, text: str) -> str:
-        return ' '.join(jieba.cut(string))
+        return ' '.join(self.jieba.cut(text))
 
     def decode(self, text: str) -> str:
         text = spacing(RE_WS_IN_FW.sub(r'\1', text)).strip()
