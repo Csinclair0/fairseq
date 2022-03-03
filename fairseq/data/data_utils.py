@@ -353,7 +353,6 @@ def batch_by_size(
                 max_sentences,
                 bsz_mult,
             )
-
     else:
         fixed_shapes = np.array(fixed_shapes, dtype=np.int64)
         sort_order = np.lexsort(
@@ -542,29 +541,6 @@ def lengths_to_mask(lens):
     return ~lengths_to_padding_mask(lens)
 
 
-def get_buckets(sizes, num_buckets):
-    buckets = np.unique(
-        np.percentile(
-            sizes,
-            np.linspace(0, 100, num_buckets + 1),
-            interpolation='lower',
-        )[1:]
-    )
-    return buckets
-
-
-def get_bucketed_sizes(orig_sizes, buckets):
-    sizes = np.copy(orig_sizes)
-    assert np.min(sizes) >= 0
-    start_val = -1
-    for end_val in buckets:
-        mask = (sizes > start_val) & (sizes <= end_val)
-        sizes[mask] = end_val
-        start_val = end_val
-    return sizes
-
-
-
 def _find_extra_valid_paths(dataset_path: str) -> set:
     paths = utils.split_paths(dataset_path)
     all_valid_paths = set()
@@ -583,7 +559,7 @@ def raise_if_valid_subsets_unintentionally_ignored(train_cfg) -> None:
         train_cfg.dataset.ignore_unused_valid_subsets
         or train_cfg.dataset.combine_valid_subsets
         or train_cfg.dataset.disable_validation
-        or not hasattr(train_cfg.task, "data")
+        or getattr(train_cfg.task, "data", None) is None
     ):
         return
     other_paths = _find_extra_valid_paths(train_cfg.task.data)

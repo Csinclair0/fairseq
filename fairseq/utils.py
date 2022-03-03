@@ -14,9 +14,10 @@ import warnings
 from itertools import accumulate
 from typing import Callable, Dict, List, Optional
 
+import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
-from fairseq.modules.multihead_attention import MultiheadAttention
 from torch import Tensor
 
 
@@ -106,11 +107,11 @@ def move_to_cuda(sample, device=None):
     return apply_to_sample(_move_to_cuda, sample)
 
 
-def move_to_cpu(sample):
+def move_to_cpu(sample, cast_to_fp32=True):
     def _move_to_cpu(tensor):
         # PyTorch has poor support for half tensors (float16) on CPU.
         # Move any such tensors to float32.
-        if tensor.dtype in {torch.bfloat16, torch.float16}:
+        if cast_to_fp32 and tensor.dtype in {torch.bfloat16, torch.float16}:
             tensor = tensor.to(dtype=torch.float32)
         return tensor.cpu()
 
@@ -130,7 +131,7 @@ def move_to_tpu(sample):
 
 
 def get_incremental_state(
-    module: MultiheadAttention,
+    module,  # type: MultiheadAttention,
     incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]],
     key: str,
 ) -> Optional[Dict[str, Optional[Tensor]]]:
@@ -139,7 +140,7 @@ def get_incremental_state(
 
 
 def set_incremental_state(
-    module: MultiheadAttention,
+    module, # type: MultiheadAttention,
     incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]],
     key: str,
     value: Dict[str, Optional[Tensor]],
@@ -257,6 +258,9 @@ def make_positions(tensor, padding_idx: int, onnx_trace: bool = False):
     return (torch.cumsum(mask, dim=1).type_as(mask) * mask).long() + padding_idx
 
 
+def assert_equal(a, b, msg=''):
+    assert a == b, f"{msg}{a} != {b}"
+
 def strip_pad(tensor, pad):
     return tensor[tensor.ne(pad)]
 
@@ -338,24 +342,26 @@ def multi_tensor_total_norm(grads, chunk_size=2048 * 32) -> torch.Tensor:
 def clip_grad_norm_(params, max_norm, aggregate_norm_fn=None) -> torch.Tensor:
     def grad_exists(p):
         return p is not None and getattr(p, "grad", None) is not None
-
     if isinstance(params, torch.Tensor):
         params = [params]
     params = list(params)
-    grads = [
-        p.grad.detach() for p in params if grad_exists(p) and not hasattr(p, "expert")
-    ]
-    expert_grads = [
-        p.grad.detach() for p in params if grad_exists(p) and hasattr(p, "expert")
-    ]
-
+    params = list(filter(grad_exists, params))
+    grads, expert_grads, base_expert_grads, sharded_grads = [], [], [], []
+    for p in params:
+        if hasattr(p, "expert"):
+            expert_grads.append(p.grad.detach())
+        elif hasattr(p, "base_expert"):
+            base_expert_grads.append(p.grad.detach())
+        elif hasattr(p, "_is_sharded"):
+            sharded_grads.append(p.grad.detach())
+        else:
+            grads.append(p.grad.detach())
     if len(grads) == 0:
         if len(params) > 0:
-            return params[0].new_tensor(0.0)
+            total_norm = params[0].new_tensor(0.0)
         else:
-            return torch.tensor(0.0)
-
-    if len(grads) == 1:
+            total_norm = torch.tensor(0.0)
+    elif len(grads) == 1:
         total_norm = torch.norm(grads[0], p=2, dtype=torch.float32)
     else:
         if multi_tensor_l2norm_available:
@@ -377,13 +383,27 @@ def clip_grad_norm_(params, max_norm, aggregate_norm_fn=None) -> torch.Tensor:
                 )
             )
 
+    # calculate split_norm and all_reduce with other workers
+    norms = [total_norm]
+    for split_grads in [expert_grads, sharded_grads]:
+        if len(split_grads) == 0:
+            continue
+        split_norm = torch.norm(torch.stack([torch.norm(g, p=2, dtype=torch.float32) for g in split_grads]))
+        if dist.is_initialized():
+            split_norm.pow_(2)
+            dist.all_reduce(split_norm)
+            split_norm.sqrt_()
+        norms.append(split_norm)
+    if len(norms) > 1:
+        total_norm = torch.norm(torch.stack(norms))
+
     if aggregate_norm_fn is not None:
         total_norm = aggregate_norm_fn(total_norm)
 
     if max_norm > 0:
         max_norm = float(max_norm)
         clip_coef = (max_norm / (total_norm + 1e-6)).clamp_(max=1)
-        for g in grads + expert_grads:
+        for g in grads + expert_grads + sharded_grads + base_expert_grads:
             g.mul_(clip_coef)
     return total_norm
 
@@ -795,16 +815,21 @@ def eval_bool(x, default=False):
         return default
 
 
-def reset_logging():
-    root = logging.getLogger()
-    for handler in root.handlers:
-        root.removeHandler(handler)
-    root.setLevel(os.environ.get("LOGLEVEL", "INFO").upper())
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(
-        logging.Formatter(
-            fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-    )
-    root.addHandler(handler)
+def print_r0(x, file=None):
+    if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
+        print(x, file=file, flush=True)
+
+
+def round_safe(x):
+    if torch.is_tensor(x):
+        return float(np.round(x.cpu().numpy(), 4))
+    else:
+        try:
+            return round(x, 4)
+        except Exception:
+            return x
+
+def print_mem(msg):
+    gb_denom = 1024**3
+    mem_info = f'max_GB: {torch.cuda.max_memory_allocated()/gb_denom:.1f}, current_GB: {torch.cuda.memory_allocated()/gb_denom:.1f}'
+    print_r0(f'{msg}: {mem_info}')

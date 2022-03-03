@@ -12,6 +12,7 @@ import torch
 from fairseq.dataclass import FairseqDataclass
 from fairseq.optim import FairseqOptimizer, register_optimizer
 from omegaconf import II, DictConfig
+import logging
 
 
 try:
@@ -19,7 +20,6 @@ try:
     has_deepspeed = True
 except ImportError as e:
     has_deepspeed = False
-
 
 def _get_cpu_adam():
 
@@ -29,6 +29,15 @@ def _get_cpu_adam():
         # fbcode
     #    from deepspeed.ops.adam import DeepSpeedCPUAdam as ds_opt_adam
     #    return ds_opt_adam
+
+def _get_cpu_adam():
+    try:
+        from deepspeed.ops.op_builder import CPUAdamBuilder
+        return CPUAdamBuilder().load()
+    except ImportError:
+        # fbcode
+        from deepspeed.ops.adam import DeepSpeedCPUAdam as ds_opt_adam
+        return ds_opt_adam
 
 @dataclass
 class FairseqCPUAdamConfig(FairseqDataclass):
@@ -115,6 +124,10 @@ class CPUAdam(torch.optim.Optimizer):
         self.ds_opt_adam.create_adam(
             self.opt_id, lr, betas[0], betas[1], eps, weight_decay, adamw_mode
         )
+
+    @property
+    def supports_memory_efficient_fp16(self):
+        return True
 
     @property
     def supports_flat_params(self):

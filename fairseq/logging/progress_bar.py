@@ -349,6 +349,9 @@ class TensorboardProgressBarWrapper(BaseProgressBar):
             _writers[key].add_text("sys.argv", " ".join(sys.argv))
         return _writers[key]
 
+    def __len__(self):
+        return len(self.wrapped_bar)
+
     def __iter__(self):
         return iter(self.wrapped_bar)
 
