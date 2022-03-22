@@ -161,6 +161,8 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                         return
                 else:
                     shard_epoch = epoch
+            else:
+                shard_epoch = epoch
         else:
             # estimate the shard epoch from virtual data size and virtual epoch size
             shard_epoch = self.data_manager.estimate_global_pass_epoch(epoch)
@@ -511,8 +513,9 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                 refs[lang] = refs[lang].append(decode(
                     utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
                     #escape_unk=False,  # don't count <unk> as matches to the hypo
-                )
-                srcs[lang] = src[lang].append([src_str])
+                ))
+                srcs[lang] = srcs[lang].append([src_str])
+                                               
         comet_scores = {}
         for lang in hyps.keys():
             scores = []
@@ -526,5 +529,5 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             all_scores = scores + new_scores
             for i in range(len(new_scores)):
                 self.comet_scores[(hyps[lang][i], refs[lang][i], srcs[lang][i])] = new_scores[i]
-           comet_scores = np.mean(all_scores)
+            comet_scores[lang] = np.mean(all_scores)
         return comet_scores
