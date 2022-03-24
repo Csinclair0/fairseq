@@ -96,6 +96,13 @@ def save_checkpoint(
         ] = not hasattr(save_checkpoint, "best") or is_better(
             val_loss, save_checkpoint.best
         )
+        worst_best = getattr(save_checkpoint, "best", None)
+        chkpts = checkpoint_paths(
+            cfg.save_dir,
+            pattern=r"checkpoint\.best_{}_(\d+\.?\d*){}\.pt".format(
+                cfg.best_checkpoint_metric, suffix
+            ),
+        )
         if len(chkpts) > 0:
             p = chkpts[-1] if cfg.maximize_best_checkpoint_metric else chkpts[0]
             worst_best = float(p.rsplit("_")[-1].replace(".pt", ""))
