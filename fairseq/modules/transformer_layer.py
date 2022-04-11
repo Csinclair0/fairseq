@@ -570,9 +570,9 @@ class TransformerDecoderLayer(nn.Module):
             # x - seq_len, batch_size, model_dim
             x = x.transpose(0, 1) # batch_size, seq_len, model_dim
             if getattr(self.args, "use_moe_pad_mask", False):
-                x, l_aux = self.moe_layer(x, input_padding_mask=self_attn_padding_mask)
+                x, l_aux = self.moe_layer(x, input_padding_mask=self_attn_padding_mask, encoder_embeddings = encoder_embeddings)
             else:
-                x, l_aux = self.moe_layer(x)
+                x, l_aux = self.moe_layer(x, encoder_embeddings=encoder_embeddings)
             x = x.transpose(0, 1) # seq_len, batch_size, model_dim
         x = self.residual_connection(x, residual)
         if not self.normalize_before:
