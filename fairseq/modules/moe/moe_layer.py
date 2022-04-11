@@ -96,7 +96,10 @@ class MOELayer(Base):
         self.a2a_cpu_time_ms = 0.0
 
     def forward(self, *input: Tensor, input_padding_mask=None, encoder_embeddings: Optional[Tensor]=None, **kwargs: Any) -> Tensor:
-        logger.info(f"encoder_embeddings: {encoder_embeddings.shape}")
+        if encoder_embeddings is not None:
+            logger.info(f"encoder_embeddings: {encoder_embeddings.shape}")
+        else:
+            logger.info(f"encoder_embeddings: None")
         assert len(input) == 1, "only single input Tensor supported"
         input = input[0]
         n_tok = input.shape[1]
