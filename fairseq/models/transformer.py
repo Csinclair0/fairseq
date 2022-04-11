@@ -1044,7 +1044,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 self_attn_mask = self.buffered_future_mask(x)
             else:
                 self_attn_mask = None
-
+            logger.info(f"encoder_embeddings.shape: {encoder_embeddings.shape}")
             x, layer_attn, _, l_aux_i = layer(
                 x,
                 enc,
@@ -1054,7 +1054,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 self_attn_padding_mask=self_attn_padding_mask,
                 need_attn=bool((idx == alignment_layer)),
                 need_head_weights=bool((idx == alignment_layer)), 
-                encoder_embed_tokens=encoder_embeddings,
+                encoder_embeddings=encoder_embeddings,
             )
             l_aux.append(l_aux_i)
             inner_states.append(x)

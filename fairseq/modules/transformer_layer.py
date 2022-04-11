@@ -453,7 +453,7 @@ class TransformerDecoderLayer(nn.Module):
         self_attn_padding_mask: Optional[torch.Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
-        encoder_embed_tokens: Optional[torch.Tensor] = None,
+        encoder_embeddings: Optional[torch.Tensor] = None,
     ):
         """
         Args:
