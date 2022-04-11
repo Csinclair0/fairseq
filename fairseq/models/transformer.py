@@ -1029,7 +1029,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         # embed tokens and positions
         x, _ = self.forward_embedding(prev_output_tokens, token_embeddings, incremental_state)
         encoder_embeddings = encoder_out["encoder_embedding"][0]
-        logger.info(f"token_embeddings.shape: {encoder_embeddings.shape}")
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 

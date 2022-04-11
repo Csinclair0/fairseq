@@ -96,6 +96,7 @@ class MOELayer(Base):
     def forward(self, *input: Tensor, input_padding_mask=None, encoder_embeddings: Optional[Tensor]=None, **kwargs: Any) -> Tensor:
         assert len(input) == 1, "only single input Tensor supported"
         input = input[0]
+        n_tok = input.shape[1]
         assert len(input.shape) == 3, "input Tensor must have dimensions: (s)equence, (t)oken, (m)odel"
         if input_padding_mask is not None:
             assert len(input_padding_mask.shape) == 2, "input Tensor must have dimensions: (s)equence, (t)oken"
@@ -111,6 +112,8 @@ class MOELayer(Base):
         # This indicates that --batch-size or --max-sentences is not specified
         if expected_bsz is None:
             expected_bsz = 0
+        
+        
         # Note: Padding is not necessary at generation time at present
         # because all DDP workers process the same batch. Also, batch size at generation time
         # can be different from that present in the checkpoint state
@@ -131,12 +134,28 @@ class MOELayer(Base):
             else:
                 padded_input_padding_mask[:input_shape[0], :] = False
             input_padding_mask = padded_input_padding_mask
+            
+            if encoder_embeddings is not None:
+                padded_encoder_embeddings = torch.zeros(
+                    (expected_bsz, input.shape[1], input.shape[2]),
+                    dtype=input.dtype, layout=input.layout, device=input.device)
+                
+                
+                encoder_embeddings = encoder_embeddings[:, 0].unsqueeze(1).repeat(1,n_tok,1) ## repeat first tokens embedding across 
+                padded_encoder_embeddings[:input_shape[0], :, :] = encoder_embeddings
+                encoder_embeddings = padded_encoder_embeddings
+                # Reshape into S tokens by dropping sequence dimension.
+                reshaped_encoder_embedding = encoder_embeddings.reshape(-1, d_model)
+
+            else:
+                reshaped_encoder_embedding = None
 
         # Reshape into S tokens by dropping sequence dimension.
         reshaped_input = input.reshape(-1, d_model)
         reshaped_input_shape = reshaped_input.shape
         reshaped_input_padding_mask = input_padding_mask.reshape(-1) if input_padding_mask is not None else None
 
+        
         # Doing padding here when --max-tokens is specified and not --batch-size or --max-sentences
         # Pro of --max-tokens: more flexible for MT variable sequence lengths
         # Con of --max-tokens: extra all-reduce needed to figure out optimal padding without running OOM
@@ -152,6 +171,13 @@ class MOELayer(Base):
             padded_input[:reshaped_input_shape[0], :] = reshaped_input
             reshaped_input = padded_input
 
+            if encoder_embeddings is not None:
+                padded_embeddings = torch.zeros(
+                    (expected_dim, reshaped_input_shape[1]),
+                    dtype=input.dtype, layout=input.layout, device=input.device)
+                padded_embeddings[:reshaped_input_shape[0], :] = reshaped_encoder_embedding
+                reshaped_encoder_embedding = padded_embeddings
+
             padded_input_padding_mask = torch.ones(
                 (expected_dim,), dtype=torch.bool, device=padded_input.device
             )
@@ -161,8 +187,11 @@ class MOELayer(Base):
                 padded_input_padding_mask[:reshaped_input_shape[0]] = False
             reshaped_input_padding_mask = padded_input_padding_mask
 
+
+
+
         if has_tutel:
-            l_aux, self.metadata, C, E, indices_, locations_, gates_ = self.gate(reshaped_input, reshaped_input_padding_mask)
+            l_aux, self.metadata, C, E, indices_, locations_, gates_ = self.gate(reshaped_input, reshaped_input_padding_mask, task_embeddings = reshaped_encoder_embedding)
             S, M = reshaped_input.size(0), reshaped_input.size(1)
 
             if not hasattr(self, '_tutel_dispatcher'):
@@ -170,7 +199,7 @@ class MOELayer(Base):
             self._tutel_dispatcher.update(indices_, locations_, gates_, capacity=C)
             dispatched_input = self._tutel_dispatcher.encode(reshaped_input)
         else:
-            l_aux, combine_weights, dispatch_mask, self.metadata = self.gate(reshaped_input, reshaped_input_padding_mask, task_embeddings = encoder_embeddings)
+            l_aux, combine_weights, dispatch_mask, self.metadata = self.gate(reshaped_input, reshaped_input_padding_mask, task_embeddings = reshaped_encoder_embedding)
 
             dispatch_mask = dispatch_mask.to(input.dtype).permute(1, 2, 0)  # S,E,C -> E,C,S
             E, C, S = dispatch_mask.size()
