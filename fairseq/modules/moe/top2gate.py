@@ -205,26 +205,6 @@ def top2gating(
     else:
         return l_aux, combine_weights, dispatch_mask, metadata
 
-def tasktop2gating(
-    logits: torch.Tensor,
-    task_embeddings: torch.Tensor,
-    input_mask: Optional[torch.Tensor] = None,
-    use_fp32=False,
-    second_expert_policy='sampling',
-    normalize_gate_prob_before_dropping=False,
-    eval_mode=False,
-    moe_eval_capacity_token_fraction=0.25,
-    batch_prioritized_routing=False,
-) -> Tuple[Tensor, Tensor, Tensor]:
-    """Implements Task level routing on logits."""
-    """Instead of using the each token, this function uses embedding_type to return a
-    sentence-wise embedding to create dispatch and combine tensors that gate
-    the entire sentence."""
-    orig_logits = logits
-    ## reshape the task embeddings 
-    task_embeddings = task_embeddings.reshape(-1, input.shape[2])
-
-
 
 
 class Top2Gate(torch.nn.Module):

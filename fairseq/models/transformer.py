@@ -1044,7 +1044,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 self_attn_mask = self.buffered_future_mask(x)
             else:
                 self_attn_mask = None
-            logger.info(f"encoder_embeddings.shape: {encoder_embeddings.shape}")
             x, layer_attn, _, l_aux_i = layer(
                 x,
                 enc,

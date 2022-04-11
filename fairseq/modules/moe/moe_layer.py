@@ -9,7 +9,6 @@
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Optional, Tuple, Union, cast
-import joblib
 import torch
 import torch.distributed as dist
 from torch import Tensor
@@ -77,8 +76,6 @@ class MOELayer(Base):
     def __init__(self, gate: Module, experts: Union[Module, ModuleList], args, group: Optional[Any] = None, all2all_group: Optional[Any] = None) -> None:
         super().__init__()
         self.gate = gate
-        joblib.dump(gate, "/home/jovyan/translation-training-v2-vol-1/testing/gate.pkl")
-        joblib.dump(experts, "/home/jovyan/translation-training-v2-vol-1/testing/experts.pkl")
         if type(experts) == ModuleList:
             self.experts = cast(ModuleList, experts)
         else:
@@ -109,12 +106,7 @@ class MOELayer(Base):
             assert input_padding_mask.shape[0] == input.shape[0]
             assert input_padding_mask.shape[1] == input.shape[1]
         # assert input.shape[0] % len(self.experts) == 0, "num tokens must be order of number of local experts"
-        joblib.dump(input, "/home/jovyan/translation-training-v2-vol-1/testing/moe_input.pkl")
-        if encoder_embeddings is not None:
-            encoder_embeddings = encoder_embeddings[:, 0].unsqueeze(1).repeat(1,n_tok,1) ## repeat first tokens embedding across 
-            joblib.dump(encoder_embeddings, "/home/jovyan/translation-training-v2-vol-1/testing/moe_ee.pkl")
-        else:
-            reshaped_encoder_embedding = None
+
         # Implement Algorithm 2 from GShard paper.
         d_model = input.shape[2]
         # Pad to expected batch size
@@ -124,7 +116,12 @@ class MOELayer(Base):
         if expected_bsz is None:
             expected_bsz = 0
         
-        
+        if encoder_embeddings is not None:
+            encoder_embeddings = encoder_embeddings[:, 0].unsqueeze(1).repeat(1,n_tok,1) ## repeat first tokens embedding across 
+            reshaped_encoder_embedding = encoder_embeddings.reshape(-1, d_model)
+        else:
+            reshaped_encoder_embedding = None
+
         # Note: Padding is not necessary at generation time at present
         # because all DDP workers process the same batch. Also, batch size at generation time
         # can be different from that present in the checkpoint state
@@ -162,8 +159,7 @@ class MOELayer(Base):
         reshaped_input_shape = reshaped_input.shape
         reshaped_input_padding_mask = input_padding_mask.reshape(-1) if input_padding_mask is not None else None
 
-        if encoder_embeddings is not None:
-            reshaped_encoder_embedding = encoder_embeddings.reshape(-1, d_model)
+
             
         # Doing padding here when --max-tokens is specified and not --batch-size or --max-sentences
         # Pro of --max-tokens: more flexible for MT variable sequence lengths
