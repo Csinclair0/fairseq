@@ -111,6 +111,7 @@ class MOELayer(Base):
         # assert input.shape[0] % len(self.experts) == 0, "num tokens must be order of number of local experts"
         joblib.dump(input, "/home/jovyan/translation-training-v2-vol-1/testing/moe_input.pkl")
         if encoder_embeddings is not None:
+            encoder_embeddings = encoder_embeddings[:, 0].unsqueeze(1).repeat(1,n_tok,1) ## repeat first tokens embedding across 
             joblib.dump(encoder_embeddings, "/home/jovyan/translation-training-v2-vol-1/testing/moe_ee.pkl")
         else:
             reshaped_encoder_embedding = None
@@ -151,7 +152,6 @@ class MOELayer(Base):
                     dtype=input.dtype, layout=input.layout, device=input.device)
                 
                 
-                encoder_embeddings = encoder_embeddings[:, 0].unsqueeze(1).repeat(1,n_tok,1) ## repeat first tokens embedding across 
                 padded_encoder_embeddings[:input_shape[0], :, :] = encoder_embeddings
                 encoder_embeddings = padded_encoder_embeddings
             else:
