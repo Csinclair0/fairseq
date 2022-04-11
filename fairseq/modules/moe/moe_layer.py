@@ -93,7 +93,7 @@ class MOELayer(Base):
         self.a2a_cuda_event_intervals = []
         self.a2a_cpu_time_ms = 0.0
 
-    def forward(self, *input: Tensor, input_padding_mask=None, encoder_embeddings: Optional[Tensor], **kwargs: Any) -> Tensor:
+    def forward(self, *input: Tensor, input_padding_mask=None, encoder_embeddings: Optional[Tensor]=None, **kwargs: Any) -> Tensor:
         assert len(input) == 1, "only single input Tensor supported"
         input = input[0]
         assert len(input.shape) == 3, "input Tensor must have dimensions: (s)equence, (t)oken, (m)odel"
