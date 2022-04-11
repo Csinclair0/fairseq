@@ -265,7 +265,7 @@ class Top2Gate(torch.nn.Module):
         self.batch_prioritized_routing = batch_prioritized_routing
         self.task_level_routing = task_level_routing
         
-    def forward(self, input: torch.Tensor, mask: Optional[torch.Tensor] = None, task_embeddings: Optional[torch.tensor]) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
+    def forward(self, input: torch.Tensor, mask: Optional[torch.Tensor] = None, task_embeddings: Optional[torch.Tensor] = None, ) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
         if task_embeddings is None:
             logits = self.wg(input)
             return top2gating(
