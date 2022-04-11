@@ -9,7 +9,7 @@
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Optional, Tuple, Union, cast
-
+import joblib
 import torch
 import torch.distributed as dist
 from torch import Tensor
@@ -77,6 +77,8 @@ class MOELayer(Base):
     def __init__(self, gate: Module, experts: Union[Module, ModuleList], args, group: Optional[Any] = None, all2all_group: Optional[Any] = None) -> None:
         super().__init__()
         self.gate = gate
+        joblib.dump(gate, "/home/jovyan/translation-training-v2-vol-1/testing/gate.pkl")
+        joblib.dump(experts, "/home/jovyan/translation-training-v2-vol-1/testing/experts.pkl")
         if type(experts) == ModuleList:
             self.experts = cast(ModuleList, experts)
         else:
@@ -104,7 +106,11 @@ class MOELayer(Base):
             assert input_padding_mask.shape[0] == input.shape[0]
             assert input_padding_mask.shape[1] == input.shape[1]
         # assert input.shape[0] % len(self.experts) == 0, "num tokens must be order of number of local experts"
-
+        joblib.dump(input, "/home/jovyan/translation-training-v2-vol-1/testing/moe_input.pkl")
+        if encoder_embeddings is not None:
+            joblib.dump(encoder_embeddings, "/home/jovyan/translation-training-v2-vol-1/testing/moe_ee.pkl")
+        else:
+            reshaped_encoder_embedding = None
         # Implement Algorithm 2 from GShard paper.
         d_model = input.shape[2]
         # Pad to expected batch size
