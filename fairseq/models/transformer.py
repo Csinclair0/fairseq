@@ -1054,8 +1054,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 self_attn_mask=self_attn_mask,
                 self_attn_padding_mask=self_attn_padding_mask,
                 need_attn=bool((idx == alignment_layer)),
-                need_head_weights=bool((idx == alignment_layer)),
-                encoder_embeddings=encoder_embeddings
+                need_head_weights=bool((idx == alignment_layer)), 
+                encoder_embed_tokens=encoder_embeddings,
             )
             l_aux.append(l_aux_i)
             inner_states.append(x)
