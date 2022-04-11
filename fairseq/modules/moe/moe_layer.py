@@ -93,7 +93,7 @@ class MOELayer(Base):
         self.a2a_cuda_event_intervals = []
         self.a2a_cpu_time_ms = 0.0
 
-    def forward(self, *input: Tensor, input_padding_mask=None, **kwargs: Any) -> Tensor:
+    def forward(self, *input: Tensor, input_padding_mask=None, encoder_embeddings: Optional[Tensor], **kwargs: Any) -> Tensor:
         assert len(input) == 1, "only single input Tensor supported"
         input = input[0]
         assert len(input.shape) == 3, "input Tensor must have dimensions: (s)equence, (t)oken, (m)odel"
@@ -170,7 +170,7 @@ class MOELayer(Base):
             self._tutel_dispatcher.update(indices_, locations_, gates_, capacity=C)
             dispatched_input = self._tutel_dispatcher.encode(reshaped_input)
         else:
-            l_aux, combine_weights, dispatch_mask, self.metadata = self.gate(reshaped_input, reshaped_input_padding_mask)
+            l_aux, combine_weights, dispatch_mask, self.metadata = self.gate(reshaped_input, reshaped_input_padding_mask, task_embeddings = encoder_embeddings)
 
             dispatch_mask = dispatch_mask.to(input.dtype).permute(1, 2, 0)  # S,E,C -> E,C,S
             E, C, S = dispatch_mask.size()

@@ -126,3 +126,21 @@ fairseq-interactive wmt19.en-ru.ensemble \
 --source-lang en \
 --target-lang ru \
 --beam 5 
+
+
+
+
+fairseq-train test_moe  \
+ --task translation --arch transformer_wmt_en_de_big --encoder-learned-pos \
+ --source-lang en --target-lang th  \
+ --decoder-learned-pos --max-update 5 --optimizer adam --adam-betas '(0.9, 0.98)' \
+ --criterion moe_cross_entropy --lr-scheduler inverse_sqrt --weight-decay 0.0 --clip-norm 0.0 \
+  --max-tokens 5184 --max-tokens-valid 5184 --skip-invalid-size-inputs-valid-test \
+ --tensorboard-logdir /data/logging --log-format simple --log-interval 1 --moe-freq 2 --moe-expert-count 10 \
+ --encoder-ffn-embed-dim 8192 --decoder-ffn-embed-dim 8192 --encoder-attention-heads 16 --decoder-attention-heads 16 \
+  --encoder-layers 6 --decoder-layers 6  \
+   --moe-gating-use-fp32 --moe-second-expert-policy all \
+  --moe-normalize-expert-grad sqrt_world_size --moe-eval-capacity-token-fraction -1.0 --checkpoint-activations \
+   --lr 0.001 --update-freq 16 --dropout 0.1 --warmup-init-lr 1e-07 --warmup-updates 4000 \
+  --patience 30 --combine-val --upsample-primary 1 --validate-after-updates 1 --validate-interval-updates 5 --save-interval-updates 5 \
+  --keep-interval-updates 5 --keep-best-checkpoints 5 

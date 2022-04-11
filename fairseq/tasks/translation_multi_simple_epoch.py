@@ -115,7 +115,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         self.data_manager = MultilingualDatasetManager.setup_data_manager(
             args, self.lang_pairs, langs, dicts, self.sampling_method
         )
-        self.comet_scores = {}
+        self.bleu_scores = {}
 
     def check_dicts(self, dicts, source_langs, target_langs):
         if self.args.source_dict is not None or self.args.target_dict is not None:
@@ -516,18 +516,12 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                 ))
                 srcs[lang] = srcs[lang].append([src_str])
                                                
-        comet_scores = {}
+        bleu_scores = {}
         for lang in hyps.keys():
             scores = []
             to_score = []
-            for combo in zip(hyps[lang], refs[lang], srcs[lang]):
-                if self.comet_scores.get(combo) is not None:
-                    scores.append(self.comet_scores[combo])
-                else:
-                    to_score.append({"src": combo[2], "ref": combo[1], "mt": combo[0]})
-            new_scores, sys_score = self.comet.predict(to_score, batch_size=100, gpus=1)
-            all_scores = scores + new_scores
-            for i in range(len(new_scores)):
-                self.comet_scores[(hyps[lang][i], refs[lang][i], srcs[lang][i])] = new_scores[i]
-            comet_scores[lang] = np.mean(all_scores)
-        return comet_scores
+            for combo in zip(hyps[lang], refs[lang]):
+                bleu_scores[lang] = sacrebleu.corpus_bleu(combo[0], [combo[1]], tokenize="none")
+                
+            
+        return bleu_scores
