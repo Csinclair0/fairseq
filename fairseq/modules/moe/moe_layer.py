@@ -154,9 +154,6 @@ class MOELayer(Base):
                 encoder_embeddings = encoder_embeddings[:, 0].unsqueeze(1).repeat(1,n_tok,1) ## repeat first tokens embedding across 
                 padded_encoder_embeddings[:input_shape[0], :, :] = encoder_embeddings
                 encoder_embeddings = padded_encoder_embeddings
-                # Reshape into S tokens by dropping sequence dimension.
-                reshaped_encoder_embedding = encoder_embeddings.reshape(-1, d_model)
-
             else:
                 reshaped_encoder_embedding = None
 
@@ -165,7 +162,9 @@ class MOELayer(Base):
         reshaped_input_shape = reshaped_input.shape
         reshaped_input_padding_mask = input_padding_mask.reshape(-1) if input_padding_mask is not None else None
 
-        
+        if encoder_embeddings is not None:
+            reshaped_encoder_embedding = encoder_embeddings.reshape(-1, d_model)
+            
         # Doing padding here when --max-tokens is specified and not --batch-size or --max-sentences
         # Pro of --max-tokens: more flexible for MT variable sequence lengths
         # Con of --max-tokens: extra all-reduce needed to figure out optimal padding without running OOM
