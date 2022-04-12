@@ -459,7 +459,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         )
         return epoch_iter
     def _inference_with_bleu(self, generator, sample, model):
-        
+        import sacrebleu
         def decode(toks):
             s = self.source_dictionary.string(
                 toks.int().cpu(),
@@ -496,7 +496,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             #detok_hypo_str = self.tokenizer.decode(hypo_str)
             lang = hypo_str[0]
             if hyps.get(lang) is None:
-                hyps[lang] = hypo_str[1:]
+                hyps[lang] = [hypo_str[1:]]
                 refs[lang] = [decode(
                     utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
                     #escape_unk=False,  # don't count <unk> as matches to the hypo
