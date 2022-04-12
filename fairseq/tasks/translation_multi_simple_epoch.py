@@ -78,9 +78,8 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                             help='keep language tokens in inference output (e.g. for analysis or debugging)')
         parser.add_argument('--eval-bleu', action = 'store_true')
         parser.add_argument('--eval-bleu-args', default = '{}')
-        parser.add_argument('--eval-bleu-detok', default = '')
         parser.add_argument('--eval-bleu-detok-args', default = '{}')
-        parser.add_argument('--eval-bleu-remove-bpe', default = '')
+        parser.add_argument('--eval-bleu-remove-bpe', default = '@@')
         parser.add_argument('--eval-bleu-print-samples', action = 'store_true')
    
 
@@ -232,24 +231,16 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
 
     def build_model(self, args):
         model = super().build_model(args)
-        if self.args.eval_bleu:
-            detok_args = json.loads(self.args.eval_bleu_detok_args)
-            if self.args.eval_bleu_detok == 'sentencepiece':
-                self.tokenizer = encoders.build_bpe(
-                    Namespace(bpe=self.args.eval_bleu_detok, **detok_args)
-                )
-            else:
-                self.tokenizer = encoders.build_tokenizer(
-                    Namespace(tokenizer=self.args.eval_bleu_detok, **detok_args)
-                )
+        if self.cfg.eval_bleu:
+            detok_args = json.loads(self.cfg.eval_bleu_detok_args)
+            self.tokenizer = encoders.build_tokenizer(
+                Namespace(tokenizer=self.cfg.eval_bleu_detok, **detok_args)
+            )
 
-            gen_args = json.loads(self.args.eval_bleu_args)
+            gen_args = json.loads(self.cfg.eval_bleu_args)
             self.sequence_generator = self.build_generator(
                 [model], Namespace(**gen_args)
             )
-            from comet import download_model, load_from_checkpoint
-            model_loc = download_model("wmt21-comet-mqm")
-            self.comet = load_from_checkpoint(model_loc)
             
         return model
 
