@@ -114,7 +114,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         self.data_manager = MultilingualDatasetManager.setup_data_manager(
             args, self.lang_pairs, langs, dicts, self.sampling_method
         )
-        self.bleu_scores = {}
+        self.args = args
 
     def check_dicts(self, dicts, source_langs, target_langs):
         if self.args.source_dict is not None or self.args.target_dict is not None:
@@ -231,13 +231,13 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
 
     def build_model(self, args):
         model = super().build_model(args)
-        if self.cfg.eval_bleu:
-            detok_args = json.loads(self.cfg.eval_bleu_detok_args)
+        if self.args.eval_bleu:
+            detok_args = json.loads(self.args.eval_bleu_detok_args)
             self.tokenizer = encoders.build_tokenizer(
-                Namespace(tokenizer=self.cfg.eval_bleu_detok, **detok_args)
+                Namespace(tokenizer=self.args.eval_bleu_detok, **detok_args)
             )
 
-            gen_args = json.loads(self.cfg.eval_bleu_args)
+            gen_args = json.loads(self.args.eval_bleu_args)
             self.sequence_generator = self.build_generator(
                 [model], Namespace(**gen_args)
             )
