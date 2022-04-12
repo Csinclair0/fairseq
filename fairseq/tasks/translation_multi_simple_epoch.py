@@ -77,10 +77,13 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         parser.add_argument('--keep-inference-langtok', action='store_true',
                             help='keep language tokens in inference output (e.g. for analysis or debugging)')
         parser.add_argument('--eval-bleu', action = 'store_true')
+        parser.add_argument('--eval-bleu-detok', default = 'space')
         parser.add_argument('--eval-bleu-args', default = '{}')
         parser.add_argument('--eval-bleu-detok-args', default = '{}')
         parser.add_argument('--eval-bleu-remove-bpe', default = '@@')
         parser.add_argument('--eval-bleu-print-samples', action = 'store_true')
+        parser.add_argument('--eval-tokenized', action = 'store_true')
+        parser.add_argument('--eval-bleu-tokenizer', default = '13a')
    
 
         SamplingMethod.add_arguments(parser)
