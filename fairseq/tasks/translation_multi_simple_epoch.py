@@ -252,11 +252,11 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         if self.args.eval_bleu:
             bleu = self._inference_with_bleu(self.sequence_generator, sample, model)
             for lang, val in bleu.items():
-                logging_output[f"_bleu_sys_len_{lang}"] = val.sys_len
-                logging_output[f"_bleu_ref_len_{lang}"] = val.ref_len
+                logging_output[f"_bleu_sys_len_{lang}"] = val[lang].sys_len
+                logging_output[f"_bleu_ref_len_{lang}"] = val[lang].ref_len
                 for i in range(EVAL_BLEU_ORDER):
-                    logging_output["_bleu_counts_" + lang + str(i)] = bleu.counts[i]
-                    logging_output["_bleu_totals_" + lang + str(i)] = bleu.totals[i]
+                    logging_output["_bleu_counts_" + lang + str(i)] = val[lang].counts[i]
+                    logging_output["_bleu_totals_" + lang + str(i)] = val[lang].totals[i]
 
     
         return loss, sample_size, logging_output
