@@ -503,7 +503,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     #escape_unk=False,  # don't count <unk> as matches to the hypo
                 )]
             else:
-                hyps[lang] = hyps[lang].append(decode(hypo_str))
+                hyps[lang] = hyps[lang].append(hypo_str)
                 refs[lang] = refs[lang].append(decode(
                     utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
                     #escape_unk=False,  # don't count <unk> as matches to the hypo
