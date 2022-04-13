@@ -487,6 +487,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
                     hypo_tokens=gen_out[i][0]["tokens"],
                     alignment=gen_out[i][0]["alignment"],
+                    src_str=None, 
                     align_dict=None,
                     tgt_dict=self.target_dictionary,
                     remove_bpe='sentencepiece',
