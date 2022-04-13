@@ -486,7 +486,6 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             lang = self.source_dictionary.string([src_tokens[0]])
             hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
                     hypo_tokens=gen_out[i][0]["tokens"],
-                    src_str=src_str, 
                     alignment=gen_out[i][0]["alignment"],
                     align_dict=None,
                     tgt_dict=self.target_dictionary,
