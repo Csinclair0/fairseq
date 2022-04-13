@@ -494,8 +494,6 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     remove_bpe='sentencepiece',
                     #extra_symbols_to_ignore=get_symbols_to_strip_from_output(generator),
                 )
-            logger.info(hypo_str)
-            logger.info(lang)
             if hyps.get(lang) is None:
                 hyps[lang] = [hypo_str]
                 refs[lang] = [decode(
@@ -507,13 +505,11 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                 refs[lang].append(decode(
                     utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
                     #escape_unk=False,  # don't count <unk> as matches to the hypo
-                ))
-        logger.info(hyps) 
-        logger.info(refs)                                    
+                ))                                
         bleu_scores = {}
         for lang in hyps.keys():
             for combo in zip(hyps[lang], refs[lang]):
-                bleu_scores[lang] = sacrebleu.corpus_bleu(combo[0], [combo[1]], tokenize="none")
+                bleu_scores[lang] = sacrebleu.corpus_bleu(combo[0], [combo[1]], tokenize="none").score
                 
             
         return bleu_scores
