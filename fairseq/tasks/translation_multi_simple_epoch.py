@@ -602,5 +602,5 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             for combo in zip(hyps[lang], refs[lang]):
                 bleu_scores[lang] = sacrebleu.corpus_bleu(combo[0], [combo[1]], tokenize="none")
                 
-            
+        logger.info(bleu_scores)    
         return bleu_scores
