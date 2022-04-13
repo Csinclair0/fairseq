@@ -461,10 +461,9 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
     def _inference_with_bleu(self, generator, sample, model):
         import sacrebleu
         def decode(toks):
-            s = self.source_dictionary.string(
+            s = self.target_dictionary.string(
                 toks.int().cpu(),
-                None, #self.args.eval_bleu_remove_bpe,
-                escape_unk=True, 
+                self.args.eval_bleu_remove_bpe,
                 # The default unknown string in fairseq is `<unk>`, but
                 # this is tokenized by sacrebleu as `< unk >`, inflating
                 # BLEU scores. Instead, we use a somewhat more verbose
@@ -476,6 +475,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             )
             if self.tokenizer:
                 s = self.tokenizer.decode(s)
+
             return s
         gen_out = self.inference_step(generator, [model], sample)
         hyps, refs, srcs = {}, {} , {}
@@ -484,7 +484,6 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     sample["net_input"]["src_tokens"][i, :], self.target_dictionary.pad()
                 )
             lang = self.source_dictionary.string([src_tokens[0]])
-            src_str = self.source_dictionary.string(src_tokens[1:], 'sentencepiece')
             hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
                     hypo_tokens=gen_out[i][0]["tokens"],
                     src_str=src_str, 
@@ -494,24 +493,20 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     remove_bpe='sentencepiece',
                     #extra_symbols_to_ignore=get_symbols_to_strip_from_output(generator),
                 )
-            detok_hypo_str = decode(hypo_str)
-            logger.info(detok_hypo_str)
-            logger.info(src_str)
+            logger.info(hypo_str)
             logger.info(lang)
             if hyps.get(lang) is None:
-                hyps[lang] = [detok_hypo_str]
+                hyps[lang] = [hypo_str]
                 refs[lang] = [decode(
                     utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
                     #escape_unk=False,  # don't count <unk> as matches to the hypo
                 )]
-                srcs[lang] = [src_str]
             else:
                 hyps[lang] = hyps[lang].append(decode(hypo_str))
                 refs[lang] = refs[lang].append(decode(
                     utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
                     #escape_unk=False,  # don't count <unk> as matches to the hypo
                 ))
-                srcs[lang] = srcs[lang].append([src_str])
                                                
         bleu_scores = {}
         for lang in hyps.keys():
