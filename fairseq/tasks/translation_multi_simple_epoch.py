@@ -252,13 +252,98 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         if self.args.eval_bleu:
             bleu = self._inference_with_bleu(self.sequence_generator, sample, model)
             for lang, val in bleu.items():
-                metrics.log_scalar(f"{lang}_bleu", val)
-                logger.info(f"{lang} BLEU: {val}")
-            mean_bleu = np.mean([x for x in bleu.values()])
-            metrics.log_scalar(f"avg_bleu", mean_bleu)
-            logger.info(f"avg BLEU: {mean_bleu}")
+                logging_output[f"_bleu_sys_len_{lang}"] = val.sys_len
+                logging_output[f"_bleu_ref_len_{lang}"] = val.ref_len
+                for i in range(EVAL_BLEU_ORDER):
+                    logging_output["_bleu_counts_" + lang + str(i)] = bleu.counts[i]
+                    logging_output["_bleu_totals_" + lang + str(i)] = bleu.totals[i]
+
+    
         return loss, sample_size, logging_output
 
+
+    def reduce_metrics(self, logging_outputs, criterion):
+        super().reduce_metrics(logging_outputs, criterion)
+        if self.cfg.eval_bleu:
+
+            def sum_logs(key):
+                import torch
+                result = sum(log.get(key, 0) for log in logging_outputs)
+                if torch.is_tensor(result):
+                    result = result.cpu()
+                return result
+            for lang in self.langs:
+                counts, totals = [], []
+                for i in range(EVAL_BLEU_ORDER):
+                    counts.append(sum_logs("_bleu_counts_" + lang + str(i)))
+                    totals.append(sum_logs("_bleu_totals_" + lang + str(i)))
+
+                if max(totals) > 0:
+                    # log counts as numpy arrays -- log_scalar will sum them correctly
+                    metrics.log_scalar(f"_bleu_counts_{lang}", np.array(counts))
+                    metrics.log_scalar(f"_bleu_totals_{lang}", np.array(totals))
+                    metrics.log_scalar(f"_bleu_sys_len_{lang}", sum_logs(f"_bleu_sys_len_{lang}"))
+                    metrics.log_scalar(f"_bleu_ref_len_{lang}", sum_logs(f"_bleu_ref_len_{lang}"))
+
+                    def compute_bleu(meters):
+                        import inspect
+                        try:
+                            from sacrebleu.metrics import BLEU
+                            comp_bleu = BLEU.compute_bleu
+                        except ImportError:
+                            # compatibility API for sacrebleu 1.x
+                            import sacrebleu
+                            comp_bleu = sacrebleu.compute_bleu
+
+                        fn_sig = inspect.getfullargspec(comp_bleu)[0]
+                        if "smooth_method" in fn_sig:
+                            smooth = {"smooth_method": "exp"}
+                        else:
+                            smooth = {"smooth": "exp"}
+                        bleu = comp_bleu(
+                            correct=meters[f"_bleu_counts_{lang}"].sum,
+                            total=meters[f"_bleu_totals_{lang}"].sum,
+                            sys_len=int(meters[f"_bleu_sys_len_{lang}"].sum),
+                            ref_len=int(meters[f"_bleu_ref_len_{lang}"].sum),
+                            **smooth
+                        )
+                        return round(bleu.score, 2)
+
+                    metrics.log_derived(f"{lang}_bleu", compute_bleu)
+                    
+                else:
+                    def zero_bleu(meters):
+                        return 0.0
+
+                    metrics.log_derived(f"{lang}_bleu", zero_bleu)
+            
+            
+            def compute_bleu_total(meters):
+                bleu_scores = 0
+                import inspect
+                try:
+                    from sacrebleu.metrics import BLEU
+                    comp_bleu = BLEU.compute_bleu
+                except ImportError:
+                    # compatibility API for sacrebleu 1.x
+                    import sacrebleu
+                    comp_bleu = sacrebleu.compute_bleu
+                for lang in self.langs:
+                    fn_sig = inspect.getfullargspec(comp_bleu)[0]
+                    if "smooth_method" in fn_sig:
+                        smooth = {"smooth_method": "exp"}
+                    else:
+                        smooth = {"smooth": "exp"}
+                        bleu_scores.append(comp_bleu(
+                        correct=meters[f"_bleu_counts_{lang}"].sum,
+                        total=meters[f"_bleu_totals_{lang}"].sum,
+                        sys_len=int(meters[f"_bleu_sys_len_{lang}"].sum),
+                        ref_len=int(meters[f"_bleu_ref_len_{lang}"].sum),
+                                **smooth
+                    ))
+                    
+                return round(np.mean(bleu_scores), 2)
+            metrics.log_derived(f"average_bleu", compute_bleu_total)
 
     def inference_step(
         self, generator, models, sample, prefix_tokens=None, constraints=None
@@ -489,6 +574,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     sample["net_input"]["src_tokens"][i, :], self.target_dictionary.pad()
                 )
             lang = self.source_dictionary.string([src_tokens[0]])
+            lang = lang[2:-2]
             src_str = self.source_dictionary.string(src_tokens.int().cpu(), self.args.eval_bleu_remove_bpe)
             hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
                     hypo_tokens=gen_out[i][0]["tokens"],
@@ -514,7 +600,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         bleu_scores = {}
         for lang in hyps.keys():
             for combo in zip(hyps[lang], refs[lang]):
-                bleu_scores[lang] = sacrebleu.corpus_bleu(combo[0], [combo[1]], tokenize="none").score
+                bleu_scores[lang] = sacrebleu.corpus_bleu(combo[0], [combo[1]], tokenize="none")
                 
             
         return bleu_scores
