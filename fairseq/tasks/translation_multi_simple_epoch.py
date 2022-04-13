@@ -252,8 +252,11 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         if self.args.eval_bleu:
             bleu = self._inference_with_bleu(self.sequence_generator, sample, model)
             for lang, val in bleu.items():
-                metrics.log_scalar(f"{lang}_comet", val)
+                metrics.log_scalar(f"{lang}_bleu", val)
+            mean_bleu = np.mean([x for x in bleu.values()])
+            metrics.log_scalar(f"avg_bleu", mean_bleu)
         return loss, sample_size, logging_output
+
 
     def inference_step(
         self, generator, models, sample, prefix_tokens=None, constraints=None
