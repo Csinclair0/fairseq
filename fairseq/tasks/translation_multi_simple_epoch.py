@@ -503,16 +503,15 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     #escape_unk=False,  # don't count <unk> as matches to the hypo
                 )]
             else:
-                hyps[lang] = hyps[lang].append(hypo_str)
-                refs[lang] = refs[lang].append(decode(
+                hyps[lang].append(hypo_str)
+                refs[lang].append(decode(
                     utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
                     #escape_unk=False,  # don't count <unk> as matches to the hypo
                 ))
-                                               
+        logger.info(hyps) 
+        logger.info(refs)                                    
         bleu_scores = {}
         for lang in hyps.keys():
-            scores = []
-            to_score = []
             for combo in zip(hyps[lang], refs[lang]):
                 bleu_scores[lang] = sacrebleu.corpus_bleu(combo[0], [combo[1]], tokenize="none")
                 
