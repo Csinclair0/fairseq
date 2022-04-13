@@ -484,10 +484,11 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     sample["net_input"]["src_tokens"][i, :], self.target_dictionary.pad()
                 )
             lang = self.source_dictionary.string([src_tokens[0]])
+            src_str = self.source_dictionary.string(src_tokens.int().cpu(), self.args.eval_bleu_remove_bpe)
             hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
                     hypo_tokens=gen_out[i][0]["tokens"],
                     alignment=gen_out[i][0]["alignment"],
-                    src_str=None, 
+                    src_str=src_str, 
                     align_dict=None,
                     tgt_dict=self.target_dictionary,
                     remove_bpe='sentencepiece',
