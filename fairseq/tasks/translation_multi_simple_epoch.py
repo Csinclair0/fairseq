@@ -483,6 +483,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             src_tokens = utils.strip_pad(
                     sample["net_input"]["src_tokens"][i, :], self.target_dictionary.pad()
                 )
+            lang = self.source_dictionary.string(src_tokens[0])
             src_str = self.source_dictionary.string(src_tokens[1:], 'sentencepiece')
             hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
                     hypo_tokens=gen_out[i][0]["tokens"],
@@ -493,17 +494,19 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     remove_bpe='sentencepiece',
                     #extra_symbols_to_ignore=get_symbols_to_strip_from_output(generator),
                 )
-            #detok_hypo_str = self.tokenizer.decode(hypo_str)
-            lang = hypo_str[0]
+            detok_hypo_str = decode(hypo_str)
+            logger.info(detok_hypo_str)
+            logger.info(src_str)
+            logger.info(lang)
             if hyps.get(lang) is None:
-                hyps[lang] = [hypo_str[1:]]
+                hyps[lang] = [detok_hypo_str]
                 refs[lang] = [decode(
                     utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
                     #escape_unk=False,  # don't count <unk> as matches to the hypo
                 )]
                 srcs[lang] = [src_str]
             else:
-                hyps[lang] = hyps[lang].append(hypo_str[1:])
+                hyps[lang] = hyps[lang].append(decode(hypo_str))
                 refs[lang] = refs[lang].append(decode(
                     utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
                     #escape_unk=False,  # don't count <unk> as matches to the hypo
