@@ -252,7 +252,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         if self.args.eval_bleu:
             bleu = self._inference_with_bleu(self.sequence_generator, sample, model)
             for lang, val in bleu.items():
-                if bleu != "NA":
+                if val != "NA":
                     logging_output[f"_bleu_sys_len_{lang}"] = val.sys_len
                     logging_output[f"_bleu_ref_len_{lang}"] = val.ref_len
                     for i in range(EVAL_BLEU_ORDER):
