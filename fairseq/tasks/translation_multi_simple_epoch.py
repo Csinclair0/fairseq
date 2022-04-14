@@ -272,7 +272,10 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                 if torch.is_tensor(result):
                     result = result.cpu()
                 return result
+
+
             for lang in self.langs:
+                logger.info(lang)
                 counts, totals = [], []
                 for i in range(EVAL_BLEU_ORDER):
                     counts.append(sum_logs("_bleu_counts_" + lang + str(i)))
@@ -300,6 +303,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                             smooth = {"smooth_method": "exp"}
                         else:
                             smooth = {"smooth": "exp"}
+                        logger.info(meters)
                         bleu = comp_bleu(
                             correct=meters[f"_bleu_counts_{lang}"].sum,
                             total=meters[f"_bleu_totals_{lang}"].sum,
