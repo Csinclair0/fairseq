@@ -261,7 +261,6 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                 logging_output["_bleu_totals_" + str(i)] = bleu.totals[i]
         return loss, sample_size, logging_output
 
-
     def reduce_metrics(self, logging_outputs, criterion):
         super().reduce_metrics(logging_outputs, criterion)
         if self.cfg.eval_bleu:
