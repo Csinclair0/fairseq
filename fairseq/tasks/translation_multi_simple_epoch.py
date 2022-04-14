@@ -252,12 +252,18 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         if self.args.eval_bleu:
             bleu = self._inference_with_bleu(self.sequence_generator, sample, model)
             for lang, val in bleu.items():
-                logging_output[f"_bleu_sys_len_{lang}"] = val.sys_len
-                logging_output[f"_bleu_ref_len_{lang}"] = val.ref_len
-                for i in range(EVAL_BLEU_ORDER):
-                    logging_output["_bleu_counts_" + lang + str(i)] = val.counts[i]
-                    logging_output["_bleu_totals_" + lang + str(i)] = val.totals[i]
-
+                if bleu != "NA":
+                    logging_output[f"_bleu_sys_len_{lang}"] = val.sys_len
+                    logging_output[f"_bleu_ref_len_{lang}"] = val.ref_len
+                    for i in range(EVAL_BLEU_ORDER):
+                        logging_output["_bleu_counts_" + lang + str(i)] = val.counts[i]
+                        logging_output["_bleu_totals_" + lang + str(i)] = val.totals[i]
+                else:
+                    logging_output[f"_bleu_sys_len_{lang}"] = 0
+                    logging_output[f"_bleu_ref_len_{lang}"] = 0
+                    for i in range(EVAL_BLEU_ORDER):
+                        logging_output["_bleu_counts_" + lang + str(i)] = 0
+                        logging_output["_bleu_totals_" + lang + str(i)] = 0
     
         return loss, sample_size, logging_output
 
@@ -601,7 +607,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
                     #escape_unk=False,  # don't count <unk> as matches to the hypo
                 ))                                
-        bleu_scores = {}
+        bleu_scores = {x : "NA" for x in self.langs} 
         for lang in hyps.keys():
             for combo in zip(hyps[lang], refs[lang]):
                 bleu_scores[lang] = sacrebleu.corpus_bleu(combo[0], [combo[1]], tokenize="none")
