@@ -248,26 +248,16 @@ class Top2Gate(torch.nn.Module):
     def forward(self, input: torch.Tensor, mask: Optional[torch.Tensor] = None, task_embeddings: Optional[torch.Tensor] = None, ) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
         if task_embeddings is None:
             logits = self.wg(input)
-            return top2gating(
-                logits,
-                mask,
-                use_fp32=self.use_fp32,
-                second_expert_policy=self.second_expert_policy,
-                normalize_gate_prob_before_dropping=self.normalize_gate_prob_before_dropping,
-                eval_mode=not self.training,
-                moe_eval_capacity_token_fraction=self.moe_eval_capacity_token_fraction,
-                batch_prioritized_routing=self.batch_prioritized_routing,
-            )
         else:
             ## get logits from task embeddings
             logits = self.wg(task_embeddings)
-            return top2gating(
-                logits,
-                mask,
-                use_fp32=self.use_fp32,
-                second_expert_policy=self.second_expert_policy,
-                normalize_gate_prob_before_dropping=self.normalize_gate_prob_before_dropping,
-                eval_mode=not self.training,
-                moe_eval_capacity_token_fraction=self.moe_eval_capacity_token_fraction,
-                batch_prioritized_routing=self.batch_prioritized_routing,
-            )
+        return top2gating(
+            logits,
+            mask,
+            use_fp32=self.use_fp32,
+            second_expert_policy=self.second_expert_policy,
+            normalize_gate_prob_before_dropping=self.normalize_gate_prob_before_dropping,
+            eval_mode=not self.training,
+            moe_eval_capacity_token_fraction=self.moe_eval_capacity_token_fraction,
+            batch_prioritized_routing=self.batch_prioritized_routing,
+        )

@@ -264,6 +264,8 @@ class TransformerModel(FairseqEncoderDecoderModel):
         # args for pseudo-MoE layers
         parser.add_argument('--alternate-ffn-embed-dim', type=int, default=0,
                             help="FFN embed dim of alternate pseudo-MoE blocks")
+        parser.add_argument('--task-level-decoder-routing', default=False, action='store_true', 
+                            help='Route by task token on the decoder.')
         # fmt: on
 
     @classmethod
@@ -321,6 +323,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
             # fsdp_wrap is a no-op when --ddp-backend != fully_sharded
             encoder = fsdp_wrap(encoder, min_num_params=min_params_to_wrap)
             decoder = fsdp_wrap(decoder, min_num_params=min_params_to_wrap)
+
         return cls(args, encoder, decoder)
 
     @classmethod
@@ -346,11 +349,16 @@ class TransformerModel(FairseqEncoderDecoderModel):
 
     @classmethod
     def build_decoder(cls, args, tgt_dict, embed_tokens):
+        pass_encoder_embeddings =  getattr(args, "task_level_decoder_routing", False):
+
+
+
         return TransformerDecoder(
             args,
             tgt_dict,
             embed_tokens,
             no_encoder_attn=getattr(args, "no_cross_attention", False),
+            pass_encoder_embeddings
         )
 
     # TorchScript doesn't support optional arguments with variable length (**kwargs).
@@ -725,6 +733,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         embed_tokens,
         no_encoder_attn=False,
         output_projection=None,
+        pass_encoder_embeddings=False
     ):
         self.args = args
         super().__init__(dictionary)
@@ -746,7 +755,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         self.max_target_positions = args.max_target_positions
 
         self.embed_tokens = embed_tokens
-
+        self.pass_encoder_embeddings = pass_encoder_embeddings
         self.embed_scale = 1.0 if args.no_scale_embedding else math.sqrt(embed_dim)
 
         if not args.adaptive_input and args.quant_noise_pq > 0:
@@ -1028,7 +1037,10 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         # embed tokens and positions
         x, _ = self.forward_embedding(prev_output_tokens, token_embeddings, incremental_state)
-        encoder_embeddings = encoder_out["encoder_embedding"][0]
+        if self.pass_encoder_embeddings:
+            encoder_embeddings = encoder_out["encoder_embedding"][0]
+        else:
+            encoder_embeddings = None
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 

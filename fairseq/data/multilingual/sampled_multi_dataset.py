@@ -180,7 +180,6 @@ class SampledMultiDataset(FairseqDataset):
         )
 
     def get_virtual_indices(self, rng, datasets, sample_ratios, virtual_size):
-        logger.info(datasets, sample_ratios, virtual_size)
         def get_counts(sample_ratios):
             counts = np.array([virtual_size * r for r in sample_ratios], dtype=np.int64)
             diff = virtual_size - counts.sum()
