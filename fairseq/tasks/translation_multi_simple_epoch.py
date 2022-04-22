@@ -263,7 +263,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
 
     def reduce_metrics(self, logging_outputs, criterion):
         super().reduce_metrics(logging_outputs, criterion)
-        if self.cfg.eval_bleu:
+        if self.args.eval_bleu:
 
             def sum_logs(key):
                 import torch
