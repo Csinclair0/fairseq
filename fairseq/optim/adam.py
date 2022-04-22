@@ -15,7 +15,7 @@ import torch.optim
 from fairseq.dataclass import FairseqDataclass
 from fairseq.optim import FairseqOptimizer, register_optimizer
 from fairseq.optim.fused_adam import get_fused_adam_class
-from omegaconf import II, OmegaConf, DictConfig
+from omegaconf import II, OmegaConf
 
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,6 @@ class FairseqAdamConfig(FairseqDataclass):
     # TODO common vars below in parent
     tpu: bool = II("common.tpu")
     lr: List[float] = II("optimization.lr")
-    block_wise: bool = field(default=False, metadata={"help": "Enables block-wise optimization for 8-bit Adam"})
 
 
 @register_optimizer("adam", dataclass=FairseqAdamConfig)
@@ -238,35 +237,3 @@ class Adam(torch.optim.Optimizer):
                     p.data.copy_(p_data_fp32)
 
         return loss
-
-
-@register_optimizer("adam8bit", dataclass=FairseqAdamConfig)
-class FairseqAdam8Bit(FairseqOptimizer):
-    def __init__(self, cfg: DictConfig, params):
-        super().__init__(cfg)
-        try:
-            import bitsandbytes as bnb
-        except ImportError:
-            raise ImportError('adam8bit requires bits and bytes: see https://gist.github.com/TimDettmers/c4ffe346f095ee4481aa3d4b4ad2fe0')
-        bnb.optim.GlobalOptimManager.get_instance().register_parameters(params)
-        self._optimizer = bnb.optim.Adam(params, optim_bits=8, **self.optimizer_config)  # equivalent
-
-    @property
-    def optimizer_config(self):
-        return {
-            "lr": self.cfg.lr[0]
-            if isinstance(self.cfg.lr, Collection)
-            else self.cfg.lr,
-            "betas": eval(self.cfg.adam_betas),
-            "eps": self.cfg.adam_eps,
-            "weight_decay": self.cfg.weight_decay,
-            "block_wise": self.cfg.block_wise,
-        }
-
-    @property
-    def supports_memory_efficient_fp16(self):
-        return True
-
-    @property
-    def supports_flat_params(self):
-        return True

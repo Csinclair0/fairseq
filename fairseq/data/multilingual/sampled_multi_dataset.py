@@ -204,8 +204,6 @@ class SampledMultiDataset(FairseqDataset):
             return indices
 
         sizes = [len(d) for d in datasets]
-
-        logger.info(sizes)
         if sample_ratios is None:
             # default back to concating datasets
             in_dataset_indices = [list(range(s)) for s in sizes]
@@ -215,7 +213,6 @@ class SampledMultiDataset(FairseqDataset):
             in_dataset_indices = get_in_dataset_indices(datasets, sizes, ratios)
             virtual_sizes_per_dataset = [len(d) for d in in_dataset_indices]
         virtual_sizes_per_dataset = np.array(virtual_sizes_per_dataset, np.int64)
-        logger.info(virtual_sizes_per_dataset)
         cumulative_sizes = np.cumsum(virtual_sizes_per_dataset)
         assert sum(virtual_sizes_per_dataset) == virtual_size
         assert cumulative_sizes[-1] == virtual_size

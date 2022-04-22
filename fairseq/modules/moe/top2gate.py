@@ -206,7 +206,6 @@ def top2gating(
         return l_aux, combine_weights, dispatch_mask, metadata
 
 
-
 class Top2Gate(torch.nn.Module):
     """Gate module which implements Top2Gating as described in Gshard_.
     ::
@@ -234,7 +233,6 @@ class Top2Gate(torch.nn.Module):
         normalize_gate_prob_before_dropping=False,
         moe_eval_capacity_token_fraction=0.25,
         batch_prioritized_routing=False,
-        task_level_routing = False
     ) -> None:
         super().__init__()
         self.wg = torch.nn.Linear(model_dim, num_experts, bias=False)
@@ -243,14 +241,9 @@ class Top2Gate(torch.nn.Module):
         self.normalize_gate_prob_before_dropping = normalize_gate_prob_before_dropping
         self.moe_eval_capacity_token_fraction = moe_eval_capacity_token_fraction
         self.batch_prioritized_routing = batch_prioritized_routing
-        self.task_level_routing = task_level_routing
         
-    def forward(self, input: torch.Tensor, mask: Optional[torch.Tensor] = None, task_embeddings: Optional[torch.Tensor] = None, ) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
-        if task_embeddings is None:
-            logits = self.wg(input)
-        else:
-            ## get logits from task embeddings
-            logits = self.wg(task_embeddings)
+    def forward(self, input: torch.Tensor, mask: Optional[torch.Tensor] = None,) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
+        logits = self.wg(input)
         return top2gating(
             logits,
             mask,

@@ -77,13 +77,11 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         parser.add_argument('--keep-inference-langtok', action='store_true',
                             help='keep language tokens in inference output (e.g. for analysis or debugging)')
         parser.add_argument('--eval-bleu', action = 'store_true')
-        parser.add_argument('--eval-bleu-detok', default = 'space')
         parser.add_argument('--eval-bleu-args', default = '{}')
+        parser.add_argument('--eval-bleu-detok', default = '')
         parser.add_argument('--eval-bleu-detok-args', default = '{}')
-        parser.add_argument('--eval-bleu-remove-bpe', default = '@@')
+        parser.add_argument('--eval-bleu-remove-bpe', default = '')
         parser.add_argument('--eval-bleu-print-samples', action = 'store_true')
-        parser.add_argument('--eval-tokenized', action = 'store_true')
-        parser.add_argument('--eval-bleu-tokenizer', default = '13a')
    
 
         SamplingMethod.add_arguments(parser)
@@ -117,7 +115,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         self.data_manager = MultilingualDatasetManager.setup_data_manager(
             args, self.lang_pairs, langs, dicts, self.sampling_method
         )
-        self.args = args
+        self.comet_scores = {}
 
     def check_dicts(self, dicts, source_langs, target_langs):
         if self.args.source_dict is not None or self.args.target_dict is not None:
@@ -236,84 +234,32 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         model = super().build_model(args)
         if self.args.eval_bleu:
             detok_args = json.loads(self.args.eval_bleu_detok_args)
-            self.tokenizer = encoders.build_tokenizer(
-                Namespace(tokenizer=self.args.eval_bleu_detok, **detok_args)
-            )
+            if self.args.eval_bleu_detok == 'sentencepiece':
+                self.tokenizer = encoders.build_bpe(
+                    Namespace(bpe=self.args.eval_bleu_detok, **detok_args)
+                )
+            else:
+                self.tokenizer = encoders.build_tokenizer(
+                    Namespace(tokenizer=self.args.eval_bleu_detok, **detok_args)
+                )
 
             gen_args = json.loads(self.args.eval_bleu_args)
             self.sequence_generator = self.build_generator(
                 [model], Namespace(**gen_args)
             )
+            from comet import download_model, load_from_checkpoint
+            model_loc = download_model("wmt21-comet-mqm")
+            self.comet = load_from_checkpoint(model_loc)
             
         return model
 
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
-        if self.cfg.eval_bleu:
+        if self.args.eval_bleu:
             bleu = self._inference_with_bleu(self.sequence_generator, sample, model)
-            logging_output["_bleu_sys_len"] = bleu.sys_len
-            logging_output["_bleu_ref_len"] = bleu.ref_len
-            # we split counts into separate entries so that they can be
-            # summed efficiently across workers using fast-stat-sync
-            assert len(bleu.counts) == EVAL_BLEU_ORDER
-            for i in range(EVAL_BLEU_ORDER):
-                logging_output["_bleu_counts_" + str(i)] = bleu.counts[i]
-                logging_output["_bleu_totals_" + str(i)] = bleu.totals[i]
+            for lang, val in bleu.items():
+                metrics.log_scalar(f"{lang}_comet", val)
         return loss, sample_size, logging_output
-
-    def reduce_metrics(self, logging_outputs, criterion):
-        super().reduce_metrics(logging_outputs, criterion)
-        if self.cfg.eval_bleu:
-
-            def sum_logs(key):
-                import torch
-                result = sum(log.get(key, 0) for log in logging_outputs)
-                if torch.is_tensor(result):
-                    result = result.cpu()
-                return result
-
-            counts, totals = [], []
-            for i in range(EVAL_BLEU_ORDER):
-                counts.append(sum_logs("_bleu_counts_" + str(i)))
-                totals.append(sum_logs("_bleu_totals_" + str(i)))
-
-            if max(totals) > 0:
-                # log counts as numpy arrays -- log_scalar will sum them correctly
-                metrics.log_scalar("_bleu_counts", np.array(counts))
-                metrics.log_scalar("_bleu_totals", np.array(totals))
-                metrics.log_scalar("_bleu_sys_len", sum_logs("_bleu_sys_len"))
-                metrics.log_scalar("_bleu_ref_len", sum_logs("_bleu_ref_len"))
-
-                def compute_bleu(meters):
-                    import inspect
-                    try:
-                        from sacrebleu.metrics import BLEU
-                        comp_bleu = BLEU.compute_bleu
-                    except ImportError:
-                        # compatibility API for sacrebleu 1.x
-                        import sacrebleu
-                        comp_bleu = sacrebleu.compute_bleu
-
-                    fn_sig = inspect.getfullargspec(comp_bleu)[0]
-                    if "smooth_method" in fn_sig:
-                        smooth = {"smooth_method": "exp"}
-                    else:
-                        smooth = {"smooth": "exp"}
-                    bleu = comp_bleu(
-                        correct=meters["_bleu_counts"].sum,
-                        total=meters["_bleu_totals"].sum,
-                        sys_len=int(meters["_bleu_sys_len"].sum),
-                        ref_len=int(meters["_bleu_ref_len"].sum),
-                        **smooth
-                    )
-                    return round(bleu.score, 2)
-
-                metrics.log_derived("bleu", compute_bleu)
-            else:
-                def zero_bleu(meters):
-                    return 0.0
-
-                metrics.log_derived("bleu", zero_bleu)
 
     def inference_step(
         self, generator, models, sample, prefix_tokens=None, constraints=None
@@ -519,11 +465,12 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         )
         return epoch_iter
     def _inference_with_bleu(self, generator, sample, model):
-        import sacrebleu
+        
         def decode(toks):
-            s = self.target_dictionary.string(
+            s = self.source_dictionary.string(
                 toks.int().cpu(),
-                self.args.eval_bleu_remove_bpe,
+                None, #self.args.eval_bleu_remove_bpe,
+                escape_unk=True, 
                 # The default unknown string in fairseq is `<unk>`, but
                 # this is tokenized by sacrebleu as `< unk >`, inflating
                 # BLEU scores. Instead, we use a somewhat more verbose
@@ -535,21 +482,52 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             )
             if self.tokenizer:
                 s = self.tokenizer.decode(s)
-
             return s
-        gen_out = self.inference_step(generator, [model], sample, prefix_tokens=None)
-        hyps, refs = [], []
+        gen_out = self.inference_step(generator, [model], sample)
+        hyps, refs, srcs = {}, {} , {}
         for i in range(len(gen_out)):
-            hyps.append(decode(gen_out[i][0]["tokens"]))
-            refs.append(
-                decode(
-                    utils.strip_pad(sample["target"][i], self.tgt_dict.pad()),
-                    escape_unk=True,  # don't count <unk> as matches to the hypo
+            src_tokens = utils.strip_pad(
+                    sample["net_input"]["src_tokens"][i, :], self.target_dictionary.pad()
                 )
-            )
-        if self.cfg.eval_bleu_print_samples:
-            logger.info("example hypothesis: " + hyps[0])
-            logger.info("example reference: " + refs[0])
-
-        return sacrebleu.corpus_bleu(hyps, [refs], tokenize="none")
-                
+            src_str = self.source_dictionary.string(src_tokens[1:], 'sentencepiece')
+            hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
+                    hypo_tokens=gen_out[i][0]["tokens"],
+                    src_str=src_str, 
+                    alignment=gen_out[i][0]["alignment"],
+                    align_dict=None,
+                    tgt_dict=self.target_dictionary,
+                    remove_bpe='sentencepiece',
+                    #extra_symbols_to_ignore=get_symbols_to_strip_from_output(generator),
+                )
+            #detok_hypo_str = self.tokenizer.decode(hypo_str)
+            lang = hypo_str[0]
+            if hyps.get(lang) is None:
+                hyps[lang] = hypo_str[1:]
+                refs[lang] = [decode(
+                    utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
+                    #escape_unk=False,  # don't count <unk> as matches to the hypo
+                )]
+                srcs[lang] = [src_str]
+            else:
+                hyps[lang] = hyps[lang].append(hypo_str[1:])
+                refs[lang] = refs[lang].append(decode(
+                    utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
+                    #escape_unk=False,  # don't count <unk> as matches to the hypo
+                ))
+                srcs[lang] = srcs[lang].append([src_str])
+                                               
+        comet_scores = {}
+        for lang in hyps.keys():
+            scores = []
+            to_score = []
+            for combo in zip(hyps[lang], refs[lang], srcs[lang]):
+                if self.comet_scores.get(combo) is not None:
+                    scores.append(self.comet_scores[combo])
+                else:
+                    to_score.append({"src": combo[2], "ref": combo[1], "mt": combo[0]})
+            new_scores, sys_score = self.comet.predict(to_score, batch_size=100, gpus=1)
+            all_scores = scores + new_scores
+            for i in range(len(new_scores)):
+                self.comet_scores[(hyps[lang][i], refs[lang][i], srcs[lang][i])] = new_scores[i]
+            comet_scores[lang] = np.mean(all_scores)
+        return comet_scores

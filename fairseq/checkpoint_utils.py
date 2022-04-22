@@ -96,6 +96,7 @@ def save_checkpoint(
         ] = not hasattr(save_checkpoint, "best") or is_better(
             val_loss, save_checkpoint.best
         )
+        worst_best = getattr(save_checkpoint, "best", None)
         chkpts = checkpoint_paths(
             cfg.save_dir,
             pattern=r"checkpoint\.best_{}_(\d+\.?\d*){}\.pt".format(
