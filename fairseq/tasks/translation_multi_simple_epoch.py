@@ -249,7 +249,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
 
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
-        if self.cfg.eval_bleu:
+        if self.args.eval_bleu:
             bleu = self._inference_with_bleu(self.sequence_generator, sample, model)
             logging_output["_bleu_sys_len"] = bleu.sys_len
             logging_output["_bleu_ref_len"] = bleu.ref_len
@@ -547,7 +547,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     escape_unk=True,  # don't count <unk> as matches to the hypo
                 )
             )
-        if self.cfg.eval_bleu_print_samples:
+        if self.args.eval_bleu_print_samples:
             logger.info("example hypothesis: " + hyps[0])
             logger.info("example reference: " + refs[0])
 
