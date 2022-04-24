@@ -91,6 +91,7 @@ def save_checkpoint(
         and cfg.keep_best_checkpoints > 0
         and not cfg.no_best_checkpoints
     ):
+        worst_best = getattr(save_checkpoint, "best", None)
         checkpoint_conds[
             "checkpoint.best_{}_{:.2f}.pt".format(cfg.best_checkpoint_metric, val_loss)
         ] = not hasattr(save_checkpoint, "best") or is_better(
