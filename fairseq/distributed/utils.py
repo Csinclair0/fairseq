@@ -59,6 +59,18 @@ def infer_init_method(cfg: DistributedTrainingConfig, force_distributed=False):
         _infer_slurm_init(cfg, num_pipelines_per_node)
     elif all(
         key in os.environ
+        for key in [
+            "MASTER_ADDR",
+            "MASTER_PORT",
+            "OMPI_COMM_WORLD_SIZE",
+            "OMPI_COMM_WORLD_RANK",
+            "OMPI_COMM_WORLD_LOCAL_RANK",
+        ]
+    ):
+        # We support open-mpi rank assignment
+        _infer_ompi_init(cfg)
+    elif all(
+        key in os.environ
         for key in ["MASTER_ADDR", "MASTER_PORT", "WORLD_SIZE", "RANK"]
     ):
         # support torch.distributed.launch
@@ -143,6 +155,22 @@ def _infer_slurm_init(cfg: DistributedTrainingConfig, num_pipelines_per_node):
             cfg.distributed_rank = int(os.environ.get("SLURM_PROCID"))
             cfg.device_id = int(os.environ.get("SLURM_LOCALID"))
 
+def _infer_ompi_init(cfg: DistributedTrainingConfig):
+
+    # OpenMPI doesn't specify a master address or port, so we need to pass them
+    host = os.environ["MASTER_ADDR"]
+    port = os.environ["MASTER_PORT"]
+
+    # Initialize distributed configuration to
+    cfg.distributed_init_method = f"tcp://{host}:{port}"
+    cfg.distributed_world_size = int(os.environ["OMPI_COMM_WORLD_SIZE"])
+    cfg.distributed_rank = int(os.environ["OMPI_COMM_WORLD_RANK"])
+
+    # Processes were created by OpenMPI
+    cfg.distributed_no_spawn = True
+
+    # Setup individual jobs
+    cfg.device_id = int(os.environ["OMPI_COMM_WORLD_LOCAL_RANK"])
 
 def _infer_single_node_init(cfg: DistributedTrainingConfig):
     assert (
