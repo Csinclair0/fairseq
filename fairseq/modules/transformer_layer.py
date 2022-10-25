@@ -315,7 +315,7 @@ class TransformerEncoderLayerBase(nn.Module):
             self_attention=True,
             q_noise=self.quant_noise,
             qn_block_size=self.quant_noise_block_size,
-            #scale_heads=cfg.scale_heads,
+            scale_heads=cfg.scale_heads,
             use_fused_softmax=cfg.use_fused_softmax,
         )
 
