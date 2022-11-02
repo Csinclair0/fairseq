@@ -156,7 +156,7 @@ def _infer_slurm_init(cfg: DistributedTrainingConfig, num_pipelines_per_node):
             cfg.device_id = int(os.environ.get("SLURM_LOCALID"))
 
 def _infer_ompi_init(cfg: DistributedTrainingConfig):
-
+    logger.info("inferrnig ompi init")
     # OpenMPI doesn't specify a master address or port, so we need to pass them
     host = os.environ["MASTER_ADDR"]
     port = os.environ["MASTER_PORT"]
@@ -171,7 +171,8 @@ def _infer_ompi_init(cfg: DistributedTrainingConfig):
 
     # Setup individual jobs
     cfg.device_id = int(os.environ["OMPI_COMM_WORLD_LOCAL_RANK"])
-
+    logger.info(f"distributed args: {cfg.distributed_init_method}")
+    
 def _infer_single_node_init(cfg: DistributedTrainingConfig):
     assert (
         cfg.distributed_world_size <= torch.cuda.device_count()
