@@ -59,6 +59,12 @@ def infer_init_method(cfg: DistributedTrainingConfig, force_distributed=False):
         _infer_slurm_init(cfg, num_pipelines_per_node)
     elif all(
         key in os.environ
+        for key in ["MASTER_ADDR", "MASTER_PORT", "WORLD_SIZE", "RANK"]
+    ):
+        # support torch.distributed.launch
+        _infer_torch_distributed_launch_init(cfg)
+    elif all(
+        key in os.environ
         for key in [
             "MASTER_ADDR",
             "MASTER_PORT",
@@ -69,12 +75,6 @@ def infer_init_method(cfg: DistributedTrainingConfig, force_distributed=False):
     ):
         # We support open-mpi rank assignment
         _infer_ompi_init(cfg)
-    elif all(
-        key in os.environ
-        for key in ["MASTER_ADDR", "MASTER_PORT", "WORLD_SIZE", "RANK"]
-    ):
-        # support torch.distributed.launch
-        _infer_torch_distributed_launch_init(cfg)
     elif cfg.distributed_world_size > 1 or force_distributed:
         # fallback for single node with multiple GPUs
         _infer_single_node_init(cfg)
@@ -156,7 +156,7 @@ def _infer_slurm_init(cfg: DistributedTrainingConfig, num_pipelines_per_node):
             cfg.device_id = int(os.environ.get("SLURM_LOCALID"))
 
 def _infer_ompi_init(cfg: DistributedTrainingConfig):
-    logger.info("inferrnig ompi init")
+    logger.info("inferrning ompi init")
     # OpenMPI doesn't specify a master address or port, so we need to pass them
     host = os.environ["MASTER_ADDR"]
     port = os.environ["MASTER_PORT"]
