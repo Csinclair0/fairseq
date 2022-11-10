@@ -25,6 +25,7 @@ from fairseq import metrics, utils
 from fairseq.data.multilingual.multilingual_data_manager import (
     MultilingualDatasetManager,
 )
+from fairseq.data import encoders
 from fairseq.data.multilingual.multilingual_utils import LangTokStyle, get_lang_tok
 from fairseq.data.multilingual.sampling_method import SamplingMethod
 from fairseq.tasks import LegacyFairseqTask, register_task
@@ -256,7 +257,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         model =  super().build_model(args, from_checkpoint)
         if self.args.eval_bleu:
             
-            detok_args = json.loads(self.cfg.eval_bleu_detok_args)
+            detok_args =  {}
             self.tokenizer = encoders.build_tokenizer(
                 Namespace(tokenizer=self.cfg.eval_bleu_detok, **detok_args)
             )
