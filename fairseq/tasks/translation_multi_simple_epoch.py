@@ -268,6 +268,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             self.sequence_generator = self.build_generator(
                 [model], Namespace(**gen_args)
             )
+        return model
 
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
