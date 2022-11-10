@@ -18,7 +18,7 @@ from fairseq.file_io import load_and_pop_last_optimizer_state
 
 try:
     from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
-    from fairscale.utils.testing import DummyProcessGroup
+    #from fairscale.utils.testing import DummyProcessGroup
 
     has_FSDP = True
 except ImportError:
