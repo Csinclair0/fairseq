@@ -86,6 +86,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         parser.add_argument('--eval-bleu', action='store_true')
         parser.add_argument('--eval-bleu-remove-bpe', default = None)
         parser.add_argument('--eval-bleu-print-samples', action = 'store_true')
+        parser.add_argument('--eval-bleu-detok', default = 'space')
 
         SamplingMethod.add_arguments(parser)
         MultilingualDatasetManager.add_args(parser)
@@ -259,10 +260,10 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             
             detok_args =  {}
             self.tokenizer = encoders.build_tokenizer(
-                Namespace(tokenizer=self.cfg.eval_bleu_detok, **detok_args)
+                Namespace(tokenizer=self.args.eval_bleu_detok, **detok_args)
             )
 
-            gen_args = json.loads(self.cfg.eval_bleu_args)
+            gen_args = json.loads(self.args.eval_bleu_args)
             self.sequence_generator = self.build_generator(
                 [model], Namespace(**gen_args)
             )
