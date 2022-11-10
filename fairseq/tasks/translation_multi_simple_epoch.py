@@ -3,11 +3,13 @@
 
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
+import json
 import datetime
 import itertools
 import logging
 import time
+from argparse import Namespace
+
 
 import numpy as np
 import torch
@@ -251,7 +253,18 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         )
 
     def build_model(self, args, from_checkpoint=False):
-        return super().build_model(args, from_checkpoint)
+        model =  super().build_model(args, from_checkpoint)
+        if self.args.eval_bleu:
+            
+            detok_args = json.loads(self.cfg.eval_bleu_detok_args)
+            self.tokenizer = encoders.build_tokenizer(
+                Namespace(tokenizer=self.cfg.eval_bleu_detok, **detok_args)
+            )
+
+            gen_args = json.loads(self.cfg.eval_bleu_args)
+            self.sequence_generator = self.build_generator(
+                [model], Namespace(**gen_args)
+            )
 
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
