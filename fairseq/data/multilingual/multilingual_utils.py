@@ -17,7 +17,7 @@ DATA_SOURCE_PREFIX_TAGS = {
 }
 
 DATA_SOURCE_TYPE_TAGS = {
-    "general_domain" : "<GD_DATA>", 
+    "gd" : "<GD_DATA>", 
     "names" : "<EXP_NAME>", 
     "igct" : "<EXP_IGCT>", 
     "desc" : "<EXP_DESC>", 

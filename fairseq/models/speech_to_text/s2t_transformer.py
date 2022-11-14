@@ -68,7 +68,9 @@ class Conv1dSubsampler(nn.Module):
         return out
 
     def forward(self, src_tokens, src_lengths):
+        print(src_tokens)
         bsz, in_seq_len, _ = src_tokens.size()  # B x T x (C x D)
+        print(src_tokens)
         x = src_tokens.transpose(1, 2).contiguous()  # -> B x (C x D) x T
         for conv in self.conv_layers:
             x = conv(x)
