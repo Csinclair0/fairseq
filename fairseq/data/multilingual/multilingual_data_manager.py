@@ -1730,6 +1730,8 @@ class MultilingualDatasetManager(object):
             self.get_split_num_data_shards(param["split"])[param["key"]]
             for param in data_param_list
         ]
+        logger.info(f"datasets {datasets}")
+        logger.info(f"num_shard {num_shard}")
         data_sizes = []
         for (key, d), num_shard in zip(datasets, num_shards):
             my_data_sizes = self._training_data_sizes[key]
