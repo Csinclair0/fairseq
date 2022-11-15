@@ -1778,6 +1778,7 @@ class MultilingualDatasetManager(object):
                 f"from file {self.args.sampling_weights_from_file}"
             )
         elif self.args.sampling_weights:
+            logger.info(self.args.sampling_weights)
             sample_ratios = [self.args.sampling_weights[k] for k, _ in datasets]
         else:
             sample_ratios = self.get_train_sampling_ratios(
