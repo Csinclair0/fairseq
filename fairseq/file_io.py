@@ -89,10 +89,7 @@ class PathManager:
     def get_local_path(path: str, **kwargs) -> str:
         if (path.startswith("ml-platform-generic") or
                  path.startswith("roblox.analytics.users")) and IOPathManager:
-            try:
-                _path = IOPathManager._get_local_path(path,  **kwargs)
-            except:
-                raise ValueError(_path)
+            logging.info(path)
             return IOPathManager._get_local_path(path,  **kwargs)
         return path
 
@@ -106,7 +103,7 @@ class PathManager:
                 try:
                     result = IOPathManager._exists(path)
                 except Exception as e:
-                    raise ValueError(path)
+                    raise ValueError
                 return result
         return os.path.exists(path)
 
