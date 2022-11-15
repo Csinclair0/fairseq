@@ -942,8 +942,8 @@ class MultilingualDatasetManager(object):
         if len(src_datasets) == 1:
             src_dataset, tgt_dataset = src_datasets[0], tgt_datasets[0]
         else:
-            sample_ratios = [1] * len(src_datasets)
-            sample_ratios[1:] = [upsample_primary] * len(sample_ratios[1:])
+            sample_ratios = [upsample_primary] * len(src_datasets)
+            sample_ratios[0] = 1
             src_dataset = ConcatDataset(src_datasets, sample_ratios)
             tgt_dataset = ConcatDataset(tgt_datasets, sample_ratios)
             assert len(src_dataset) == upsample_primary * len(src_datasets[0]) + sum(
