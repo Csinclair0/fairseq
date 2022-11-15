@@ -1479,37 +1479,40 @@ class MultilingualDatasetManager(object):
             )
 
         else:
-            langpair_ds = self.load_langpair_dataset(
-                data_path,
-                split,
-                src,
-                src_dict,
-                tgt,
-                tgt_dict,
-                combine,
-                dataset_impl,
-                upsample_primary,
-                left_pad_source,
-                left_pad_target,
-                max_source_positions,
-                max_target_positions,
-                prepend_bos,
-                load_alignments,
-                truncate_source,
-                src_dataset_transform_func=lambda dataset: src_dataset_transform_func(
-                    src, tgt, dataset, src_langtok_spec
-                ),
-                tgt_dataset_transform_func=lambda dataset: tgt_dataset_transform_func(
-                    src, tgt, dataset, tgt_langtok_spec
-                ),
-                src_lang_id=_lang_id(lang_dictionary, src)
-                if enable_lang_ids and lang_dictionary is not None
-                else None,
-                tgt_lang_id=_lang_id(lang_dictionary, tgt)
-                if enable_lang_ids and lang_dictionary is not None
-                else None,
-                langpairs_sharing_datasets=langpairs_sharing_datasets,
-            )
+            try:
+                langpair_ds = self.load_langpair_dataset(
+                    data_path,
+                    split,
+                    src,
+                    src_dict,
+                    tgt,
+                    tgt_dict,
+                    combine,
+                    dataset_impl,
+                    upsample_primary,
+                    left_pad_source,
+                    left_pad_target,
+                    max_source_positions,
+                    max_target_positions,
+                    prepend_bos,
+                    load_alignments,
+                    truncate_source,
+                    src_dataset_transform_func=lambda dataset: src_dataset_transform_func(
+                        src, tgt, dataset, src_langtok_spec
+                    ),
+                    tgt_dataset_transform_func=lambda dataset: tgt_dataset_transform_func(
+                        src, tgt, dataset, tgt_langtok_spec
+                    ),
+                    src_lang_id=_lang_id(lang_dictionary, src)
+                    if enable_lang_ids and lang_dictionary is not None
+                    else None,
+                    tgt_lang_id=_lang_id(lang_dictionary, tgt)
+                    if enable_lang_ids and lang_dictionary is not None
+                    else None,
+                    langpairs_sharing_datasets=langpairs_sharing_datasets,
+                )
+            except: 
+                return None
         # TODO: handle modified lang toks for mined data and dae data
         if self.args.lang_tok_replacing_bos_eos:
             ds = self.alter_dataset_langtok(
@@ -1694,8 +1697,6 @@ class MultilingualDatasetManager(object):
                 ), (f"error: src={src}, " "tgt={tgt} for data_category={data_category}")
                 # logger.info(f"preparing param for {data_category}: {src} - {tgt}")
                 key = self.get_dataset_key(data_category, src, tgt)
-                logger.info(key)
-                logger.info(split_num_shards_dict)
                 if key in split_num_shards_dict:
                     data_path = self.get_split_data_path(
                         paths, epoch, shard_epoch, split_num_shards_dict[key]
@@ -1813,6 +1814,7 @@ class MultilingualDatasetManager(object):
             )
             for param in data_param_list
         ]
+        datasets = [x for x in datasets if x[1] != None]
 
         return datasets, data_param_list
 
