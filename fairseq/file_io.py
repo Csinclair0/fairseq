@@ -106,7 +106,7 @@ class PathManager:
                 try:
                     result = IOPathManager._exists(path)
                 except Exception as e:
-                    raise ValueError
+                    raise ValueError(path)
                 return result
         return os.path.exists(path)
 
