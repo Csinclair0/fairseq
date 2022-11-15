@@ -1765,8 +1765,11 @@ class MultilingualDatasetManager(object):
         data_sizes = self.get_train_dataset_sizes(
             data_param_list, datasets, epoch, shard_epoch
         )
+        logger.info(f"dataset_sizes {data_sizes}")
         sampling_func = self.sampling_method.sampling_method_selector()
+        logger.info(f"sampling func {sampling_func}")
         sample_ratios = sampling_func(data_sizes) if sampling_func is not None else None
+        logger.info(f"sample_ratios { sample_ratios}")
         return sample_ratios
 
     def get_sampling_ratios(self, data_param_list, datasets, epoch, shard_epoch=None):
