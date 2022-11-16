@@ -73,9 +73,9 @@ class MOETaskLayer(Base):
     def forward(self, *input: Tensor, input_padding_mask=None, prefix_tokens=None, 
         encoder_embeddings: Optional[Tensor]=None, **kwargs: Any) -> Tensor:
         expert_output_1 = self.experts[0](
-            input
+            input[0]
         )
         expert_output_2 = self.experts[1](
-            input
+            input[0]
         )
         return expert_output_1 + expert_output_2 , 0
