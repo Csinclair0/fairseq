@@ -633,8 +633,7 @@ class TransformerDecoderLayerBase(nn.Module):
                     init_model_on_gpu=init_model_on_gpu,
                 )
             experts = make_experts(cfg, self.embed_dim, ffn_dim, self.dropout_module)
-            if not self.cfg.task_level_decoder_routing:
-                self.moe_layer = MOELayer(
+            self.moe_layer = MOELayer(
                 gate,
                 experts,
                 cfg,
@@ -642,10 +641,6 @@ class TransformerDecoderLayerBase(nn.Module):
                 tok_dropout=cfg.moe_eom,
                 moe_local_drop=cfg.moe_local_drop,
             )
-            else:
-                self.moe_layer = MOETaskLayer(
-                    experts
-                )
             if cfg.moe_cmr:
                 self.cmr_layer = CMRLayer(
                     self.moe_layer,
