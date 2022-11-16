@@ -23,7 +23,7 @@ from fairseq.modules.fused_bias_gelu import (
 )
 from fairseq.modules.fused_bias_relu_squared import fused_bias_relu_squared
 from fairseq.modules.linear import Linear
-from fairseq.modules.moe import CMRLayer, MOELayer, Top1Gate, Top2Gate
+from fairseq.modules.moe import CMRLayer, MOELayer, Top1Gate, Top2Gate, MOETaskLayer
 from fairseq.modules.quant_noise import quant_noise
 from fairseq.utils import relu_squared
 
@@ -633,7 +633,8 @@ class TransformerDecoderLayerBase(nn.Module):
                     init_model_on_gpu=init_model_on_gpu,
                 )
             experts = make_experts(cfg, self.embed_dim, ffn_dim, self.dropout_module)
-            self.moe_layer = MOELayer(
+            if not self.cfg.task_level_decoder_routing:
+                self.moe_layer = MOELayer(
                 gate,
                 experts,
                 cfg,
@@ -641,6 +642,10 @@ class TransformerDecoderLayerBase(nn.Module):
                 tok_dropout=cfg.moe_eom,
                 moe_local_drop=cfg.moe_local_drop,
             )
+            else:
+                self.moe_layer = MOETaskLayer(
+                    experts
+                )
             if cfg.moe_cmr:
                 self.cmr_layer = CMRLayer(
                     self.moe_layer,
