@@ -266,6 +266,7 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
         tokens,
         token_embedding: Optional[torch.Tensor] = None,
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
+        decoder_route: bool = False
     ):
         # embed tokens and positions
         positions = None
@@ -278,7 +279,9 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             tokens = tokens[:, -1:]
             if positions is not None:
                 positions = positions[:, -1:]
-
+        if decoder_route:
+            tokens = tokens[:, -1:]
+            
         if token_embedding is None:
             token_embedding = self.embed_tokens(tokens)
 
@@ -433,9 +436,14 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             prev_output_tokens, token_embeddings, incremental_state
         )
         if self.pass_encoder_embeddings and prev_output_tokens.shape[1] > 2:
+            #print(f"prev_output {prev_output_tokens[:, :2]}")
+            #print(f"prev_out_shape{prev_output_tokens[:, :2].shape}")
             encoder_embeddings = self.forward_embedding(
-            prev_output_tokens[:, :2], token_embeddings, incremental_state
+            prev_output_tokens[:, :2], token_embeddings, None
         )[0]
+            #print(f"encoder_embeddings {encoder_embeddings}")
+            #print(f"token_embeddings {token_embeddings}")
+            #print(f"incremental_state {None}")
         else:
             encoder_embeddings = None
 

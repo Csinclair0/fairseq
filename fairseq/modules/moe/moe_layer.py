@@ -96,6 +96,8 @@ class MOELayer(Base):
         init_model_on_gpu: Optional[bool] = False,
         tok_dropout: float = 0.0,
         moe_local_drop: float = 0.0,
+        combine_weights: Tensor = None, 
+        
     ) -> None:
         super().__init__()
         self.gate = gate
@@ -129,6 +131,8 @@ class MOELayer(Base):
         self.max_positions = max_positions
         self.tok_dropout = tok_dropout
         self.moe_local_drop = moe_local_drop
+        self.combine_weights = combine_weights
+        self.task_idx = None
 
     def forward(
         self, *input: Tensor, input_padding_mask=None, prefix_tokens=None, 
@@ -136,6 +140,8 @@ class MOELayer(Base):
     ) -> Tensor:
         assert len(input) == 1, "only single input Tensor supported"
         input = input[0]
+        #if encoder_embeddings is not None:
+        #    logger.info(f"input {input}")
         n_tok = input.shape[1]
         assert (
             len(input.shape) == 3
@@ -163,7 +169,7 @@ class MOELayer(Base):
 
         ## add in task level decoder routing
         if encoder_embeddings is not None:
-            encoder_embeddings = encoder_embeddings[:, 0].unsqueeze(1).repeat(1,n_tok,1) ## repeat first tokens embedding across 
+            encoder_embeddings = encoder_embeddings[:, 1].unsqueeze(1).repeat(1,n_tok,1) ## repeat first tokens embedding across 
             reshaped_encoder_embedding = encoder_embeddings.reshape(-1, d_model)
         else:
             reshaped_encoder_embedding = None
@@ -306,22 +312,35 @@ class MOELayer(Base):
             dispatched_input = self._tutel_dispatcher.encode(reshaped_input)
         else:
             l_aux, combine_weights, dispatch_mask, self.metadata = self.gate(
-                reshaped_input,
-                reshaped_input_padding_mask,
-                eval_capacity_length,
-                prefix_tokens=reshaped_prefix_tokens,
-                task_embeddings = reshaped_encoder_embedding
-            )
+                    reshaped_input,
+                    reshaped_input_padding_mask,
+                    eval_capacity_length,
+                    prefix_tokens=reshaped_prefix_tokens,
+                    task_embeddings = reshaped_encoder_embedding
+                )
+            
+            if encoder_embeddings is not None and self.task_idx is not None:
+                #print(f"combine_weights {combine_weights}")
+                #print(f"dispatch mask {dispatch_mask}")
+                #print(f"n_tok {n_tok}")
+                #print(input)
+                combine_weights = combine_weights[:, self.task_idx, :]
+                dispatch_mask = dispatch_mask[:, self.task_idx, :]
+            
+            
             dispatch_mask = dispatch_mask.to(input.dtype).permute(
                 1, 2, 0
             )  # S,E,C -> E,C,S
+            #print(f"dispatch mask {dispatch_mask}")
             E, C, S = dispatch_mask.size()
             M = reshaped_input.size(1)
             assert reshaped_input.size() == (S, M)
+            #print(f"reshaped_input {reshaped_input}")
             # einsum("sec,sm->ecm")
             dispatched_input = torch.mm(
                 dispatch_mask.view(E * C, S), reshaped_input
             )  # -> (E*C),M
+            #print(f"dispatched input {dispatched_input}")
         use_all_to_all = True
         if self.moe_local_drop > 0.0 and self.training:
             if dist.get_rank() == 0:
@@ -338,10 +357,13 @@ class MOELayer(Base):
             self.all2all_size, self.num_local_experts, -1, d_model
         )
         chunks = dispatched_input.chunk(self.num_local_experts, dim=1)
+        #print(f"chunks {chunks}")
         expert_outputs = []
         for chunk, expert in zip(chunks, self.experts):
+            #print(f"expert {expert(chunk)}")
             expert_outputs += [expert(chunk)]
         expert_output = torch.cat(expert_outputs, dim=1)
+        #print(f"expert_output {expert_output}")
         if self.all2all_size > 1 and use_all_to_all:
             expert_output = self.all_to_all_wrapper(expert_output)
         if self.tok_dropout > 0.0:
@@ -381,6 +403,7 @@ class MOELayer(Base):
 
         self.record_all_to_all_stats()
 
+        #if encoder_embeddings is not None: logger.info(f"output {combined_output}")
         return combined_output, {"moe_gate_loss": l_aux}
 
     def prepare_for_inference_(self):
