@@ -927,7 +927,7 @@ class MultilingualDatasetManager(object):
                 if self.add_data_source_prefix_tags:
                     for fold in DATA_SOURCE_PREFIX_TAGS:
                         for data_type in DATA_SOURCE_TYPE_TAGS:
-                            if split == f"valid_{fold}_{data_type}":
+                            if split_k == f"valid_{fold}_{data_type}":
                                 logger.info(
                                         f"Prepending prefix token: {DATA_SOURCE_PREFIX_TAGS[fold]} for {split} data."
                                     )
