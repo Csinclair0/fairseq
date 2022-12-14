@@ -629,6 +629,9 @@ class OptimizationConfig(FairseqDataclass):
     max_update: int = field(
         default=0, metadata={"help": "force stop training at specified update"}
     )
+    max_update_per_epoch: int = field(
+        default = 100000, metadata = {"help" : "max updates per epoch"}
+    )
     stop_time_hours: float = field(
         default=0,
         metadata={
