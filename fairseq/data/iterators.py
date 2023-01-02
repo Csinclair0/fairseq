@@ -526,7 +526,7 @@ class GroupedIterator(CountingIterator):
         n (int): number of elements consumed from this iterator
     """
 
-    def __init__(self, iterable, chunk_size, skip_remainder_batch=False):
+    def __init__(self, iterable, chunk_size, skip_remainder_batch=False, max_update_in_epoch=0):
         if skip_remainder_batch:
             total_num_itrs = int(math.floor(len(iterable) / float(chunk_size)))
             logger.info(
@@ -537,6 +537,9 @@ class GroupedIterator(CountingIterator):
             logger.info(f"grouped total_num_itrs = {total_num_itrs}")
 
         itr = _chunk_iterator(iterable, chunk_size, skip_remainder_batch)
+        if max_update_in_epoch > 0:
+            total_num_itrs = max_update_in_epoch
+            logger.info(f"updated grouped total_num_itrs = {total_num_itrs}")
         super().__init__(
             itr,
             start=int(math.ceil(getattr(iterable, "n", 0) / float(chunk_size))),
