@@ -656,7 +656,7 @@ class LaserDistillationTask(LegacyFairseqTask):  # TODO: move to FairseqTask
         def forward_backward(model, smp, teacher_order, weight_key):
             nonlocal agg_loss, agg_sample_size, agg_logging_output
 
-            with torch.autograd.profiler.record_function("forward"):
+            with torch.profiler.record_function("forward"):
                 if weight_key in ["mask", "tlm"]:
                     loss, sample_size, logging_output = self.masked_lm_criterion(
                         model.encoder, smp, teacher_order

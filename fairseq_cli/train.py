@@ -330,7 +330,7 @@ def train(
     num_updates = trainer.get_num_updates()
     logger.info("Start iterating over samples")
     for i, samples in enumerate(progress):
-        with metrics.aggregate("train_inner"), torch.autograd.profiler.record_function(
+        with metrics.aggregate("train_inner"), torch.profiler.record_function(
             "train_step-%d" % i
         ):
             if update_freq == 1:
@@ -628,7 +628,7 @@ def cli_main(
 
     if args.profile:
         with torch.cuda.profiler.profile():
-            with torch.autograd.profiler.emit_nvtx():
+            with torch.profiler.emit_nvtx():
                 distributed_utils.call_main(cfg, main)
     else:
         distributed_utils.call_main(cfg, main)

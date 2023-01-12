@@ -430,7 +430,7 @@ def hydra_main(cfg: InferConfig) -> Union[float, Tuple[float, Optional[float]]]:
     try:
         if cfg.common.profile:
             with torch.cuda.profiler.profile():
-                with torch.autograd.profiler.emit_nvtx():
+                with torch.profiler.emit_nvtx():
                     distributed_utils.call_main(cfg, main)
         else:
             distributed_utils.call_main(cfg, main)

@@ -114,7 +114,7 @@ class SpeechToTextHeadSelectionTask(SpeechToTextTask):
         model.encoder.set_task_ids(encoder_task_ids)
         model.decoder.set_task_ids(decoder_task_ids)
 
-        with torch.autograd.profiler.record_function("forward"):
+        with torch.profiler.record_function("forward"):
             with torch.cuda.amp.autocast(enabled=(isinstance(optimizer, AMPOptimizer))):
                 loss, sample_size, logging_output = criterion(model, sample)
                 # KL loss
@@ -142,7 +142,7 @@ class SpeechToTextHeadSelectionTask(SpeechToTextTask):
 
         if ignore_grad:
             loss *= 0
-        with torch.autograd.profiler.record_function("backward"):
+        with torch.profiler.record_function("backward"):
             optimizer.backward(loss)
         return loss, sample_size, logging_output
 

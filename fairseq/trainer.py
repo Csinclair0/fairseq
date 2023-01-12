@@ -1046,13 +1046,13 @@ class Trainer(object):
         overflow = False
         logger.debug(f"[{self.get_num_updates()}] done with fwd, bwd")
         try:
-            with torch.autograd.profiler.record_function("reduce-grads"):
+            with torch.profiler.record_function("reduce-grads"):
                 # reduce gradients across workers
                 self.optimizer.all_reduce_grads(self.model)
                 if utils.has_parameters(self.criterion):
                     self.optimizer.all_reduce_grads(self.criterion)
 
-            with torch.autograd.profiler.record_function("multiply-grads"):
+            with torch.profiler.record_function("multiply-grads"):
                 # multiply gradients by (data_parallel_size / sample_size) since
                 # DDP normalizes by the number of data parallel workers for
                 # improved fp16 precision.
@@ -1071,7 +1071,7 @@ class Trainer(object):
                 # way that avoids CPU/device transfers in case sample_size is a GPU or
                 # TPU object. The assumption is that the gradient itself is also 0.
 
-            with torch.autograd.profiler.record_function("clip-grads"):
+            with torch.profiler.record_function("clip-grads"):
                 # clip grads
                 grad_norm = self.clip_grad_norm(self.cfg.optimization.clip_norm)
 
@@ -1094,7 +1094,7 @@ class Trainer(object):
                         # check local gradnorm single GPU case, trigger NanDetector
                         raise FloatingPointError("gradients are Nan/Inf")
 
-            with torch.autograd.profiler.record_function("optimizer"):
+            with torch.profiler.record_function("optimizer"):
                 # take an optimization step
                 self.task.optimizer_step(
                     self.optimizer, model=self.model, update_num=self.get_num_updates()
