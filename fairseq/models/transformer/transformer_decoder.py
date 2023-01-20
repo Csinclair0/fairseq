@@ -257,7 +257,7 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
         min_params_to_wrap = cfg.min_params_to_wrap if not checkpoint else 0
         if not is_moe_layer or cfg.ddp_backend != "fully_sharded":
             layer = fsdp_wrap(layer, min_num_params=min_params_to_wrap)
-        else:
+        elif cfg.ddp_backend == "fully_sharded":
             layer = fsdp_wrap_expert(cfg, layer, min_num_params=min_params_to_wrap)
         return layer
 
