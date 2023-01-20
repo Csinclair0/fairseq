@@ -216,10 +216,15 @@ class TransformerEncoderLayerBase(nn.Module):
                     init_model_on_gpu=cfg.init_model_on_gpu,
                 )
             experts = make_experts(cfg, self.embed_dim, ffn_dim, self.dropout_module)
+            if cfg.ddp_backend != 'fully_sharded':
+                group = torch.distributed.group.WORLD
+            else:
+                group = None
             self.moe_layer = MOELayer(
                 gate,
                 experts,
                 cfg,
+                group, 
                 max_positions=cfg.max_source_positions,
                 tok_dropout=cfg.moe_eom,
                 moe_local_drop=cfg.moe_local_drop,
