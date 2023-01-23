@@ -217,7 +217,7 @@ class TransformerEncoderLayerBase(nn.Module):
                 )
             experts = make_experts(cfg, self.embed_dim, ffn_dim, self.dropout_module)
             if cfg.ddp_backend != 'fully_sharded':
-                group = torch.distributed.group.WORLD
+                group = dist_utils.get_data_parallel_group()
             else:
                 group = None
             self.moe_layer = MOELayer(
