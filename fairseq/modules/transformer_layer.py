@@ -225,6 +225,7 @@ class TransformerEncoderLayerBase(nn.Module):
                 experts,
                 cfg,
                 group, 
+                all2all_group=group, 
                 max_positions=cfg.max_source_positions,
                 tok_dropout=cfg.moe_eom,
                 moe_local_drop=cfg.moe_local_drop,
