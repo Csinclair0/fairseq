@@ -485,7 +485,7 @@ def get_moe_group(moe_expert_count, eps_size):
                 assert moe_expert_count % world_size == 0
                 moe_groups = [[i] for i in range(world_size)]
             if eps_size != 0:
-                moe_groups = [range(world_size)]
+                moe_groups = [[ i for i in range(world_size)]] * world_size
 
             # larger world than num experts
             else:

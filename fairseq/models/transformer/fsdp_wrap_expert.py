@@ -27,7 +27,7 @@ def fsdp_wrap_expert(cfg, layer, min_num_params=0):
 
     for i, expert in enumerate(layer.moe_layer.experts):
         layer.moe_layer.experts[i] = fsdp_wrap(
-            expert, process_group=process_group, min_num_params=0
+            expert, process_group=process_group, min_num_params=min_num_params
         )
     if cfg.moe_normalize_expert_grad in {
         "sqrt_num_experts",
