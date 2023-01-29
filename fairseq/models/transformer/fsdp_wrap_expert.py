@@ -26,10 +26,9 @@ def fsdp_wrap_expert(cfg, layer, min_num_params=0):
     num_experts = world_size / pg_size
 
     for i, expert in enumerate(layer.moe_layer.experts):
-        if cfg.ddp_backend == 'fully_sharded':
-            layer.moe_layer.experts[i] = fsdp_wrap(
-                expert, process_group=process_group, min_num_params=0
-            )
+        layer.moe_layer.experts[i] = fsdp_wrap(
+            expert, process_group=process_group, min_num_params=0
+        )
     if cfg.moe_normalize_expert_grad in {
         "sqrt_num_experts",
         "sqrt_world_size",
@@ -48,6 +47,5 @@ def fsdp_wrap_expert(cfg, layer, min_num_params=0):
         p.register_hook(functools.partial(div_by_world_size, expert_normalization_term))
 
     # Everything else gets wrapped as normal.
-    if cfg.ddp_backend == 'fully_sharded':
-        layer = fsdp_wrap(layer, min_num_params=min_num_params)
+    layer = fsdp_wrap(layer, min_num_params=min_num_params)
     return layer

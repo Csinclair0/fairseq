@@ -216,19 +216,14 @@ class TransformerEncoderLayerBase(nn.Module):
                     init_model_on_gpu=cfg.init_model_on_gpu,
                 )
             experts = make_experts(cfg, self.embed_dim, ffn_dim, self.dropout_module)
-            if cfg.ddp_backend != 'fully_sharded':
-                group = dist_utils.get_data_parallel_group()
-            else:
-                group = None
             self.moe_layer = MOELayer(
                 gate,
                 experts,
                 cfg,
-                group, 
-                all2all_group=group, 
                 max_positions=cfg.max_source_positions,
                 tok_dropout=cfg.moe_eom,
                 moe_local_drop=cfg.moe_local_drop,
+                eps_size=cfg.moe_eps_size,
             )
             if cfg.moe_cmr:
                 self.cmr_layer = CMRLayer(

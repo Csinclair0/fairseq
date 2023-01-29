@@ -475,7 +475,7 @@ def get_global_group():
         return None
 
 
-def get_moe_group(moe_expert_count):
+def get_moe_group(moe_expert_count, eps_size):
     if torch.distributed.is_initialized():
         if not hasattr(get_moe_group, "_moe_groups"):
             world_size = get_global_world_size()
@@ -484,6 +484,8 @@ def get_moe_group(moe_expert_count):
             if world_size <= moe_expert_count:
                 assert moe_expert_count % world_size == 0
                 moe_groups = [[i] for i in range(world_size)]
+            if eps_size != 0:
+                moe_groups = [range(world_size)]
 
             # larger world than num experts
             else:
@@ -501,7 +503,7 @@ def get_moe_group(moe_expert_count):
         return get_moe_group._moe_groups[my_group_idx]
 
 
-def get_all2all_group(moe_expert_count):
+def get_all2all_group(moe_expert_count, eps_size):
     if torch.distributed.is_initialized():
         if not hasattr(get_all2all_group, "_all2all_groups"):
             world_size = get_global_world_size()

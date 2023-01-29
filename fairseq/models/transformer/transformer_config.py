@@ -402,6 +402,10 @@ class TransformerConfig(FairseqDataclass):
     task_level_decoder_routing: bool = field(
         default=False
     )
+    moe_eps_size: int = field(
+        default=0,
+        metadata={"help": "moe eps size"},
+    )
 
     # We need to make this hierarchical dataclass like the flat namespace
     # __getattr__ and __setattr__ here allow backward compatibility

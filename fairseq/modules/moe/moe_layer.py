@@ -96,6 +96,7 @@ class MOELayer(Base):
         init_model_on_gpu: Optional[bool] = False,
         tok_dropout: float = 0.0,
         moe_local_drop: float = 0.0,
+        eps_size: int = 0,
     ) -> None:
         super().__init__()
         self.gate = gate
@@ -106,12 +107,12 @@ class MOELayer(Base):
         self.expert_group = (
             group
             if group is not None
-            else distributed_utils.get_moe_group(args.moe_expert_count)
+            else distributed_utils.get_moe_group(args.moe_expert_count, eps_size)
         )
         self.all2all_group = (
             all2all_group
             if all2all_group is not None
-            else distributed_utils.get_all2all_group(args.moe_expert_count)
+            else distributed_utils.get_all2all_group(args.moe_expert_count, eps_size)
         )
         for p in experts.parameters():
             p.expert = True  # type: ignore
