@@ -114,6 +114,8 @@ class MOELayer(Base):
             if all2all_group is not None
             else distributed_utils.get_all2all_group(args.moe_expert_count, eps_size)
         )
+        logger.info(f"eg: {self.expert_group}")
+        logger.info(f"a2a {self.all2all_group}")
         for p in experts.parameters():
             p.expert = True  # type: ignore
         self.world_size = distributed_utils.get_world_size(self.expert_group)
