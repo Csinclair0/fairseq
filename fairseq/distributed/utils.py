@@ -513,6 +513,8 @@ def get_all2all_group(moe_expert_count, eps_size):
                 assert moe_expert_count % world_size == 0
                 all2all_groups = [[i for i in range(world_size)]]
 
+            if eps_size != 0:
+                moe_groups = [[ i for i in range(world_size)]] * world_size
             # larger world than num experts
             else:
                 assert world_size % moe_expert_count == 0
