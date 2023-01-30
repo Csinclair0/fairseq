@@ -107,19 +107,19 @@ class MOELayer(Base):
         self.expert_group = (
             group
             if group is not None
-            else distributed_utils.get_moe_group(args.moe_expert_count, eps_size)
+            else None #distributed_utils.get_moe_group(args.moe_expert_count, eps_size)
         )
         self.all2all_group = (
             all2all_group
             if all2all_group is not None
-            else distributed_utils.get_all2all_group(args.moe_expert_count, eps_size)
+            else None #distributed_utils.get_all2all_group(args.moe_expert_count, eps_size)
         )
         logger.info(f"eg: {self.expert_group}")
         logger.info(f"a2a {self.all2all_group}")
         for p in experts.parameters():
             p.expert = True  # type: ignore
-        self.world_size = distributed_utils.get_world_size(self.expert_group)
-        self.all2all_size = distributed_utils.get_world_size(self.all2all_group)
+        self.world_size = torch.distributed.get_world_size()
+        self.all2all_size = torch.distributed.get_world_size()
         self.num_local_experts = len(self.experts)
         self.args = args
         self.in_generation = False
@@ -325,7 +325,7 @@ class MOELayer(Base):
             dispatched_input = torch.mm(
                 dispatch_mask.view(E * C, S), reshaped_input
             )  # -> (E*C),M
-        use_all_to_all = True
+        use_all_to_all = False
         if self.moe_local_drop > 0.0 and self.training:
             if dist.get_rank() == 0:
                 use_all_to_all = (
