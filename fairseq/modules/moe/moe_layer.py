@@ -325,7 +325,7 @@ class MOELayer(Base):
             dispatched_input = torch.mm(
                 dispatch_mask.view(E * C, S), reshaped_input
             )  # -> (E*C),M
-        use_all_to_all = False
+        use_all_to_all = True
         if self.moe_local_drop > 0.0 and self.training:
             if dist.get_rank() == 0:
                 use_all_to_all = (
