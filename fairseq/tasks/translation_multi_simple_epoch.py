@@ -91,6 +91,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         parser.add_argument('--eval-bleu-print-samples', action = 'store_true')
         parser.add_argument('--eval-bleu-detok', default = 'space')
         parser.add_argument('--eval-bleu-args', default = '{}')
+        parser.add_argument('--eval-bleu-after-updates', default = 0)
 
         SamplingMethod.add_arguments(parser)
         MultilingualDatasetManager.add_args(parser)
@@ -273,7 +274,8 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
     
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
-        if self.args.eval_bleu:
+
+        if self.args.eval_bleu and logging_output["num_updates"] > self.args.eval_bleu_after_updates:
             EVAL_BLEU_ORDER = 4
             bleu = self._inference_with_bleu(self.sequence_generator, sample, model)
             logging_output["_bleu_sys_len"] = bleu.sys_len
