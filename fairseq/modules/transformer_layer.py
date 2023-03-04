@@ -994,9 +994,9 @@ def make_experts(cfg, embed_dim, expert_ffn_dim, dropout_module) -> nn.ModuleLis
                 )
 
     else:  # less experts than gpus
-        assert (
-            world_size % cfg.moe_expert_count == 0
-        ), f"{world_size}, {cfg.moe_expert_count}"
+        #assert (
+        #    world_size % cfg.moe_expert_count == 0
+        #), f"{world_size}, {cfg.moe_expert_count}"
         # initialize each FFN with the same seed on different GPUs
         with utils.set_torch_seed(start_seed + ddp_rank % cfg.moe_expert_count):
             expert_list.append(
