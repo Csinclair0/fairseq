@@ -3,7 +3,7 @@
 
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
+import datetime
 import contextlib
 import io
 import logging
@@ -295,6 +295,7 @@ def distributed_init(cfg: FairseqConfig):
                 init_method=cfg.distributed_training.distributed_init_method,
                 world_size=cfg.distributed_training.distributed_world_size,
                 rank=cfg.distributed_training.distributed_rank,
+                timeout=datetime.timedelta(seconds=5400)
             )
             logger.info(
                 "initialized host {} as rank {}".format(
