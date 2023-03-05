@@ -1533,6 +1533,7 @@ class MultilingualDatasetManager(object):
                     langpairs_sharing_datasets=langpairs_sharing_datasets,
                 )
             except Exception as e:
+                logger.info(f"Failed to load {data_path}:{src}-{tgt} dataset")
                 logger.info(e) 
                 return None
         # TODO: handle modified lang toks for mined data and dae data
