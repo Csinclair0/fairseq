@@ -1532,7 +1532,8 @@ class MultilingualDatasetManager(object):
                     else None,
                     langpairs_sharing_datasets=langpairs_sharing_datasets,
                 )
-            except: 
+            except Exception as e:
+                logger.info(e) 
                 return None
         # TODO: handle modified lang toks for mined data and dae data
         if self.args.lang_tok_replacing_bos_eos:
