@@ -191,12 +191,12 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         else:
             # estimate the shard epoch from virtual data size and virtual epoch size
             shard_epoch = self.data_manager.estimate_global_pass_epoch(epoch)
-        logger.info(f"loading data for {split} epoch={epoch}/{shard_epoch}")
-        logger.info(f"mem usage: {data_utils.get_mem_usage()}")
+        #logger.info(f"loading data for {split} epoch={epoch}/{shard_epoch}")
+        #logger.info(f"mem usage: {data_utils.get_mem_usage()}")
         if split in self.datasets:
             del self.datasets[split]
-            logger.info("old dataset deleted manually")
-            logger.info(f"mem usage: {data_utils.get_mem_usage()}")
+            #logger.info("old dataset deleted manually")
+            #logger.info(f"mem usage: {data_utils.get_mem_usage()}")
         split_datasets = self.data_manager.load_dataset(
             split,
             self.training,
@@ -406,7 +406,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
 
             # get indices ordered by example size
             start_time = time.time()
-            logger.info(f"start batch sampler: mem usage: {data_utils.get_mem_usage()}")
+            #logger.info(f"start batch sampler: mem usage: {data_utils.get_mem_usage()}")
 
             with data_utils.numpy_seed(seed):
                 if self.one_dataset_per_batch:
@@ -421,10 +421,10 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     log_tag = f"[{split}] [{ds_idx}]"
                 else:
                     log_tag = f"[{split}]"
-                logger.info(
+                #logger.info(
                     f"{log_tag} @batch_sampler order indices time: {get_time_gap(start_time, time.time())}"
-                )
-                logger.info(f"mem usage: {data_utils.get_mem_usage()}")
+                #)
+                #logger.info(f"mem usage: {data_utils.get_mem_usage()}")
 
                 # filter examples that are too large
                 if max_positions is not None and split is not None:
@@ -432,10 +432,10 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     indices = self.filter_indices_by_size(
                         indices, dataset, max_positions, ignore_invalid_inputs
                     )
-                    logger.info(
-                        f"{log_tag} @batch_sampler filter_by_size time: {get_time_gap(my_time, time.time())}"
-                    )
-                    logger.info(f"mem usage: {data_utils.get_mem_usage()}")
+                    #logger.info(
+                    #    f"{log_tag} @batch_sampler filter_by_size time: {get_time_gap(my_time, time.time())}"
+                    #)
+                    #logger.info(f"mem usage: {data_utils.get_mem_usage()}")
 
                 # create mini-batches with given size constraints
                 my_time = time.time()
@@ -448,13 +448,13 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                 subdataset_sampler_list.append(batch_sampler)
 
                 end_time = time.time()
-                logger.info(
-                    f"{log_tag} @batch_sampler batch_by_size time: {get_time_gap(my_time, end_time)}"
-                )
-                logger.info(
-                    f"{log_tag} per epoch batch_sampler set-up time: {get_time_gap(start_time, end_time)}"
-                )
-                logger.info(f"mem usage: {data_utils.get_mem_usage()}")
+                #logger.info(
+                #    f"{log_tag} @batch_sampler batch_by_size time: {get_time_gap(my_time, end_time)}"
+                #)
+                #logger.info(
+                #    f"{log_tag} per epoch batch_sampler set-up time: {get_time_gap(start_time, end_time)}"
+                #)
+                #logger.info(f"mem usage: {data_utils.get_mem_usage()}")
 
             combined_batch_sampler = itertools.chain(*subdataset_sampler_list)
             return combined_batch_sampler
