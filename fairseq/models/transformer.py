@@ -431,7 +431,8 @@ class TransformerEncoder(FairseqEncoder):
             token_embedding = self.embed_tokens(src_tokens)
         x = embed = self.embed_scale * token_embedding
         if self.embed_positions is not None:
-            x = embed + self.embed_positions(src_tokens)
+            embed_positions = self.embed_positions(src_tokens)
+            x = embed + embed_positions 
         if self.layernorm_embedding is not None:
             x = self.layernorm_embedding(x)
         x = self.dropout_module(x)
@@ -481,7 +482,7 @@ class TransformerEncoder(FairseqEncoder):
         self,
         src_tokens,
         src_lengths: Optional[torch.Tensor] = None,
-        return_all_hiddens: bool = False,
+        _return_all_hiddens: Optional[bool] = False,
         token_embeddings: Optional[torch.Tensor] = None,
     ):
         """
@@ -507,15 +508,14 @@ class TransformerEncoder(FairseqEncoder):
                   hidden states of shape `(src_len, batch, embed_dim)`.
                   Only populated if *return_all_hiddens* is True.
         """
-        # compute padding mask
-        encoder_padding_mask = src_tokens.eq(self.padding_idx)
-        has_pads = src_tokens.device.type == "xla" or encoder_padding_mask.any()
+
+        return_all_hiddens : bool = False
+        encoder_padding_mask = torch.eq(src_tokens, self.padding_idx)
 
         x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
 
         # account for padding while computing the representation
-        if has_pads:
-            x = x * (1 - encoder_padding_mask.unsqueeze(-1).type_as(x))
+        x = x * (1 - encoder_padding_mask.unsqueeze(-1).type_as(x))
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
@@ -528,7 +528,7 @@ class TransformerEncoder(FairseqEncoder):
         # encoder layers
         for layer in self.layers:
             x = layer(
-                x, encoder_padding_mask=encoder_padding_mask if has_pads else None
+                x, encoder_padding_mask=encoder_padding_mask 
             )
             if return_all_hiddens:
                 assert encoder_states is not None

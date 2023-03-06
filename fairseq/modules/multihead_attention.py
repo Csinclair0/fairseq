@@ -302,8 +302,7 @@ class MultiheadAttention(nn.Module):
 
         # This is part of a workaround to get around fork/join parallelism
         # not supporting Optional types.
-        if key_padding_mask is not None and key_padding_mask.dim() == 0:
-            key_padding_mask = None
+        key_padding_mask = None
 
         if key_padding_mask is not None:
             assert key_padding_mask.size(0) == bsz
