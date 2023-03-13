@@ -224,17 +224,7 @@ class Trainer(object):
     @property
     def should_save_checkpoint_on_current_rank(self) -> bool:
         """Indicates whether to save checkpoints on the current DDP rank."""
-        has_alt_ffn_dim = (
-            getattr(self.cfg.model, "alternate_decoder_ffn_embed_dim", 0) != 0
-        )
-        if (
-            (self.is_fsdp)
-            or (self.is_moe and not has_alt_ffn_dim)
-            or getattr(self.cfg.model, "base_layers", 0) > 0
-        ):
-            return True
-        else:
-            return self.is_data_parallel_master
+        return self.is_data_parallel_master
 
     @property
     def always_call_state_dict_during_save_checkpoint(self) -> bool:
