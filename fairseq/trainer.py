@@ -420,7 +420,7 @@ class Trainer(object):
             assert self._gathered_optim_state is not None
 
     def state_dict(self, filename, training_finished=False) -> Dict[str, Dict]:
-        if False:
+        if self.is_moe or self.is_base_moe:
             (
                 (shared_model_state_dict, shared_optimizer_state_dict),
                 (expert_model_state_dict, expert_optimizer_state_dict),
