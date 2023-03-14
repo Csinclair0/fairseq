@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 
 import torch
 from omegaconf import OmegaConf
-
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from fairseq import checkpoint_utils, models, moe_checkpoint_utils, optim, utils
 from fairseq.dataclass.configs import FairseqConfig
 from fairseq.dataclass.utils import convert_namespace_to_omegaconf
@@ -411,7 +411,7 @@ class Trainer(object):
         if hasattr(self.optimizer.optimizer, "consolidate_state_dict"):
             self.optimizer.optimizer.consolidate_state_dict()
         elif self.is_fsdp and not self.use_sharded_state:
-            st = self.model.gather_full_optim_state_dict(
+            st = FSDP.full_optim_state_dict(self.model,
                 self.optimizer
             )  # only returns on rank 0
             if st is None:
@@ -525,9 +525,9 @@ class Trainer(object):
             ):
                 state_dict["last_optimizer_state"] = optimizer_state_dict
 
-            if self.is_fsdp and self.use_sharded_state:
+            #if self.is_fsdp and self.use_sharded_state:
                 # save meta data for recombining checkpoint upon loading
-                state_dict["shard_metadata"] = self.model.local_metadata_dict()
+            #    state_dict["shard_metadata"] = self.model.local_metadata_dict()
             state_dicts[filename] = state_dict
         return state_dicts
 

@@ -245,7 +245,7 @@ class MoELabelSmoothedCrossEntropyCriterion(FairseqCriterion):
                     module_names.append(name)
             if key == "median_prefix_count_expert1":
                 encoder_vals = [
-                    v for name, v in zip(module_names, vals) if ".encoder." in name
+                    v for name, v in zip(module_names, vals) if "encoder." in name
                 ]
                 moe_logging_output["median_prefix_count_expert1_encoder"] = sum(
                     encoder_vals
@@ -257,7 +257,7 @@ class MoELabelSmoothedCrossEntropyCriterion(FairseqCriterion):
                     "median_prefix_count_expert1_encoder_last_layer"
                 ] = encoder_vals[-1]
                 decoder_vals = [
-                    v for name, v in zip(module_names, vals) if ".decoder." in name
+                    v for name, v in zip(module_names, vals) if "decoder." in name
                 ]
                 moe_logging_output["median_prefix_count_expert1_decoder"] = sum(
                     decoder_vals

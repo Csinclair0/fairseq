@@ -17,7 +17,9 @@ from fairseq.distributed import utils as dist_utils
 from fairseq.file_io import load_and_pop_last_optimizer_state
 
 try:
-    from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
+    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+    from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
+
     #from fairscale.utils.testing import DummyProcessGroup
 
     has_FSDP = True
@@ -97,7 +99,7 @@ class FullyShardedDataParallel(FSDP):
 @contextlib.contextmanager
 def fsdp_enable_wrap(cfg: DistributedTrainingConfig, **kwargs):
     try:
-        from fairscale.nn import enable_wrap
+        from torch.distributed.fsdp.wrap import enable_wrap
     except ImportError:
         raise ImportError(
             "Cannot find FullyShardedDataParallel. "
@@ -119,6 +121,7 @@ def fsdp_enable_wrap(cfg: DistributedTrainingConfig, **kwargs):
         "compute_dtype": torch.float16 if cfg.fp16 else torch.float32,
         "bucket_cap_mb": cfg.bucket_cap_mb,
         "state_dict_device": torch.device("cpu"),  # reduce GPU mem usage
+         "sharding_strategy" : ShardingStrategy.NO_SHARD, # no sharding
         **kwargs,
     }
     with enable_wrap(
