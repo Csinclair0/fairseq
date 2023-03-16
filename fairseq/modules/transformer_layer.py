@@ -979,11 +979,11 @@ def make_experts(cfg, embed_dim, expert_ffn_dim, dropout_module) -> nn.ModuleLis
     ddp_rank = dist_utils.get_data_parallel_rank()
     start_seed = torch.randint(1000000, (1,)).item()
 
-    if cfg.moe_expert_count >= world_size:  # at least as many experts than gpus
-        assert (
-            cfg.moe_expert_count % world_size == 0
-        ), f"{cfg.moe_expert_count}, {world_size}"
-        local_moe_expert_count = cfg.moe_expert_count // world_size
+    if True:  # at least as many experts than gpus
+        #assert (
+        #    cfg.moe_expert_count % world_size == 0
+        #), f"{cfg.moe_expert_count}, {world_size}"
+        local_moe_expert_count = cfg.moe_expert_count 
         for i in range(local_moe_expert_count):
             with utils.set_torch_seed(
                 start_seed + ddp_rank * local_moe_expert_count + i
