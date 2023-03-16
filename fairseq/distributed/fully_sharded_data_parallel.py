@@ -113,14 +113,14 @@ def fsdp_enable_wrap(cfg: DistributedTrainingConfig, **kwargs):
         group = DummyProcessGroup(rank=0, size=1)
     fsdp_config = {
         "process_group": group,
-        "reshard_after_forward": not cfg.no_reshard_after_forward,
-        "mixed_precision": cfg.fp16 and not cfg.memory_efficient_fp16,
-        "fp32_reduce_scatter": cfg.fp32_reduce_scatter,
-        "flatten_parameters": True,
+       # "reshard_after_forward": not cfg.no_reshard_after_forward,
+        "mixed_precision": torch.distributed.fsdp.MixedPrecision , #cfg.fp16 and not cfg.memory_efficient_fp16,
+       # "fp32_reduce_scatter": cfg.fp32_reduce_scatter,
+      #  "flatten_parameters": True,
         "cpu_offload": cfg.cpu_offload and not cfg.memory_efficient_fp16,
-        "compute_dtype": torch.float16 if cfg.fp16 else torch.float32,
-        "bucket_cap_mb": cfg.bucket_cap_mb,
-        "state_dict_device": torch.device("cpu"),  # reduce GPU mem usage
+       # "compute_dtype": torch.float16 if cfg.fp16 else torch.float32,
+      #  "bucket_cap_mb": cfg.bucket_cap_mb,
+      #  "state_dict_device": torch.device("cpu"),  # reduce GPU mem usage
          "sharding_strategy" : ShardingStrategy.NO_SHARD, # no sharding
         **kwargs,
     }
