@@ -146,14 +146,18 @@ def fsdp_wrap(module, min_num_params: Optional[int] = None, **kwargs):
 
     def wrap(module, **kwargs):
         try:
-            from fairscale.nn import wrap as fairscale_fsdp_wrap
+            from torch.distributed.fsdp.wrap import (
+                size_based_auto_wrap_policy,
+                enable_wrap,
+                wrap,
+            )
 
             # reset child instances on fresh wrap
             for m in module.modules():
                 if isinstance(m, FSDP):
                     m._reset_lazy_init()
 
-            return fairscale_fsdp_wrap(module, **kwargs)
+            return wrap(module, **kwargs)
         except ImportError:
             return module
 
