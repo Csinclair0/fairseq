@@ -1,10 +1,11 @@
 import torch 
 import typing
+import logging 
 from torch import Tensor
 from deepspeed.moe.layer import MoE as DsMoE
 from typing import Callable, Dict, Optional, Tuple, Any
 
-
+logger = logging.getLogger(__name__)
 class MoE(DsMoE):
     def __init__(self,
                  hidden_size,
@@ -57,7 +58,42 @@ class MoE(DsMoE):
 
     def forward(self, *input: Tensor, input_padding_mask=None, used_token = None, prefix_tokens=None, 
         encoder_embeddings: Optional[Tensor]=None, **kwargs: Any):
-        output = self.deepspeed_moe(input[0], used_token)
+        input = input[0]
+        input_shape = list(input.shape)
+        if input_padding_mask is not None:
+            assert (
+                len(input_padding_mask.shape) == 2
+            ), "input Tensor must have dimensions: (s)equence, (t)oken"
+            assert input_padding_mask.shape[0] == input.shape[0]
+            assert input_padding_mask.shape[1] == input.shape[1]
+    
+        expected_bsz = (
+            getattr(self.args, "batch_size", 0)
+            if self.training
+            else getattr(self.args, "batch_size_valid", 0)
+        )
+        if expected_bsz is None:
+            expected_bsz = 0
+            
+        if (
+            not self.in_generation
+            and expected_bsz != 0
+            and input_shape[0] != expected_bsz
+        ):
+            logger.warning(
+                f"padding batch with unexpected size {input_shape[0]} (expected: {expected_bsz})"
+            )
+            assert input_shape[0] < expected_bsz, f"{input_shape[0]} < {expected_bsz}"
+            padded_input = torch.zeros(
+                (expected_bsz, input_shape[1], input_shape[2]),
+                dtype=input.dtype,
+                layout=input.layout,
+                device=input.device,
+            )
+            padded_input[: input_shape[0], :, :] = input
+            input = padded_input
+
+        output = self.deepspeed_moe(input, used_token)
         if self.use_residual:
             # Residual MoE
             output_mlp = self.mlp(input[0])
