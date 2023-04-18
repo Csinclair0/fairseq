@@ -292,6 +292,8 @@ def load_checkpoint_to_cpu(path, arg_overrides=None, load_on_all_ranks=False):
     if local_path != path and PathManager.path_requires_pathmanager(path):
         try:
             os.remove(local_path)
+        except IsADirectoryError:
+            os.rmdir(local_path)
         except FileNotFoundError:
             # With potentially multiple processes removing the same file, the
             # file being missing is benign (missing_ok isn't available until
