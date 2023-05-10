@@ -9,7 +9,7 @@ from typing import Dict, Sequence
 
 import numpy as np
 
-from . import FairseqDataset, LanguagePairDataset, SampledMultiEpochDataset,
+from . import FairseqDataset, LanguagePairDataset, SampledMultiEpochDataset
 
 logger = logging.getLogger(__name__)
 
