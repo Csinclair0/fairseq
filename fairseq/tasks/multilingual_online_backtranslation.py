@@ -21,7 +21,7 @@ from fairseq.data import (
     RoundRobinZipDatasets,
     TransformEosLangPairDataset,
     data_utils,
-    encoders
+    encoders,
 )
 from fairseq.tasks import register_task
 
