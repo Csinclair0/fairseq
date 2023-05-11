@@ -206,7 +206,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         mono_dataset_src = PrependTokenDataset(
             mono_dataset, _lang_token_index(self.dictionary, lang)
         )
-        mono_dataset_tgt = PrependTokenDataset(mono_dataset_src, self.dictionary.bos())
+        mono_dataset_tgt = PrependTokenDataset(mono_dataset_src, self.dictionary.eos())
 
         mono_dataset_bt = self._langpair_dataset(mono_dataset_src, mono_dataset_tgt)
         logger.info(
