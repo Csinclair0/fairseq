@@ -206,8 +206,9 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         mono_dataset_src = PrependTokenDataset(
             mono_dataset, _lang_token_index(self.dictionary, lang)
         )
+        mono_dataset_tgt = PrependTokenDataset(mono_dataset_src, self.dictionary.bos())
 
-        mono_dataset_bt = self._langpair_dataset(mono_dataset_src, mono_dataset)
+        mono_dataset_bt = self._langpair_dataset(mono_dataset_src, mono_dataset_tgt)
         logger.info(
             f"mono_lang = {lang} "
             f"lang token index = {_lang_token_index(self.dictionary, lang)} "
@@ -330,7 +331,6 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         generated = self.sequence_generator.generate(
             models=[], sample=smp, prefix_tokens= prefix_tokens, 
         )
-
         max_lngth = max([gn[0]["tokens"].size(0) for gn in generated])
         net_input = smp["net_input"]
         n_src_tokens = torch.empty(
