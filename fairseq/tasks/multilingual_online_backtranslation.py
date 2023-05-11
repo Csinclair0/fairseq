@@ -389,7 +389,6 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         agg_loss, agg_sample_size = 0.0, 0.0
         agg_logging_output: Dict[str, float] = defaultdict(float)
         
-        logger.info(sample)
         
         dataset_keys = self.datasets["train"].datasets.keys()
     
