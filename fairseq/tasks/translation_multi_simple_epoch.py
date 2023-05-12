@@ -278,6 +278,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             for i in range(EVAL_BLEU_ORDER):
                 logging_output["_bleu_counts_" + str(i)] = bleu.counts[i]
                 logging_output["_bleu_totals_" + str(i)] = bleu.totals[i]
+                
         return loss, sample_size, logging_output
 
     def inference_step(
@@ -319,10 +320,8 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
     def reduce_metrics(self, logging_outputs, criterion):
         super().reduce_metrics(logging_outputs, criterion)
         if self.args.eval_bleu:
-
             def sum_logs(key):
                 import torch
-
                 result = sum(log.get(key, 0) for log in logging_outputs)
                 if torch.is_tensor(result):
                     result = result.cpu()
@@ -332,6 +331,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             for i in range(EVAL_BLEU_ORDER):
                 counts.append(sum_logs("_bleu_counts_" + str(i)))
                 totals.append(sum_logs("_bleu_totals_" + str(i)))
+            
 
             if max(totals) > 0:
                 # log counts as numpy arrays -- log_scalar will sum them correctly
@@ -363,6 +363,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                         total=meters["_bleu_totals"].sum,
                         sys_len=int(meters["_bleu_sys_len"].sum),
                         ref_len=int(meters["_bleu_ref_len"].sum),
+                        max_ngram_order = 2, 
                         **smooth,
                     )
                     return round(bleu.score, 2)
