@@ -31,6 +31,7 @@ from fairseq.data.multilingual.sampling_method import SamplingMethod
 from fairseq.tasks import LegacyFairseqTask, register_task
 from fairseq.utils import FileContentsAction
 
+EVAL_BLEU_ORDER = 4
 
 ###
 def get_time_gap(s, e):
@@ -317,6 +318,56 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
 
     def reduce_metrics(self, logging_outputs, criterion):
         super().reduce_metrics(logging_outputs, criterion)
+        if self.args.eval_bleu:
+
+            def sum_logs(key):
+                import torch
+
+                result = sum(log.get(key, 0) for log in logging_outputs)
+                if torch.is_tensor(result):
+                    result = result.cpu()
+                return result
+
+            counts, totals = [], []
+            for i in range(EVAL_BLEU_ORDER):
+                counts.append(sum_logs("_bleu_counts_" + str(i)))
+                totals.append(sum_logs("_bleu_totals_" + str(i)))
+
+            if max(totals) > 0:
+                # log counts as numpy arrays -- log_scalar will sum them correctly
+                metrics.log_scalar("_bleu_counts", np.array(counts))
+                metrics.log_scalar("_bleu_totals", np.array(totals))
+                metrics.log_scalar("_bleu_sys_len", sum_logs("_bleu_sys_len"))
+                metrics.log_scalar("_bleu_ref_len", sum_logs("_bleu_ref_len"))
+
+                def compute_bleu(meters):
+                    import inspect
+
+                    try:
+                        from sacrebleu.metrics import BLEU
+
+                        comp_bleu = BLEU.compute_bleu
+                    except ImportError:
+                        # compatibility API for sacrebleu 1.x
+                        import sacrebleu
+
+                        comp_bleu = sacrebleu.compute_bleu
+
+                    fn_sig = inspect.getfullargspec(comp_bleu)[0]
+                    if "smooth_method" in fn_sig:
+                        smooth = {"smooth_method": "exp"}
+                    else:
+                        smooth = {"smooth": "exp"}
+                    bleu = comp_bleu(
+                        correct=meters["_bleu_counts"].sum,
+                        total=meters["_bleu_totals"].sum,
+                        sys_len=int(meters["_bleu_sys_len"].sum),
+                        ref_len=int(meters["_bleu_ref_len"].sum),
+                        **smooth,
+                    )
+                    return round(bleu.score, 2)
+
+                metrics.log_derived("bleu", compute_bleu)
 
     def max_positions(self):
         """Return the max sentence length allowed by the task."""
