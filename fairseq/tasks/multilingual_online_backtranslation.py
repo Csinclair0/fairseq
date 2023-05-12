@@ -305,7 +305,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                 f"\t\t[ src tokens]  {src_tokens}\n"
             )
 
-    def backtranslate_sample(self, smp, orig_lang, other_lang) -> None:
+    def backtranslate_sample(self, smp, orig_lang, other_lang, model) -> None:
         """
         * WARNING: smp is modified in place.
         * At the start of this function, `smp` has the same input and target:
@@ -323,11 +323,12 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
           |--------------------------------------------------------|
 
         """
+        model.eval()
         lang_token = _lang_token_index(self.dictionary, other_lang)
         net_input = smp["net_input"]
         prefix_tokens = torch.full((net_input['src_tokens'].shape[0], 1), lang_token, dtype=net_input["src_tokens"].dtype, device = net_input["src_tokens"].device )
         generated = self.sequence_generator.generate(
-            models=[], sample=smp, prefix_tokens= prefix_tokens, 
+            models=[model], sample=smp, prefix_tokens= prefix_tokens, 
         )
         max_lngth = max([gn[0]["tokens"].size(0) for gn in generated])
         net_input = smp["net_input"]
@@ -354,19 +355,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         net_input["src_tokens"] = n_src_tokens.to(device)
         net_input["src_lengths"] = n_src_lengths.to(device)
 
-    def generate(self, smp, model):
-        model.eval()
-        orig_lang = (
-            self.dictionary[smp["net_input"]["src_tokens"][0][0]]
-            .replace(" ", "")
-            .replace("_", "")
-        )
-        bos_token = smp["net_input"]["prev_output_tokens"][0][0]
-        with torch.no_grad():
-            generated = self.sequence_generator.generate(
-                models=[model], sample=smp, bos_token=bos_token
-            )
-        return generated
+
     
     def get_other_lang(self, lang):
         # TODO: allow more complex mapping
@@ -407,7 +396,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                 with torch.autograd.profiler.record_function("backtranslation"):
                     model.eval()
                     other_lang = self.get_other_lang(mono_lang)
-                    self.backtranslate_sample(smp, mono_lang, other_lang)
+                    self.backtranslate_sample(smp, mono_lang, other_lang, model)
                     self.display_samples_once_in_a_while(smp, mono_lang, other_lang)
                     model.train()
 
