@@ -197,14 +197,12 @@ class SampledMultiDataset(FairseqDataset):
 
         def get_in_dataset_indices(datasets, sample_ratios):
             counts = get_counts(sample_ratios)
-            logger.info("got counts")
             # uniformally sample desired counts for each dataset
             # if the desired counts are large, sample with replacement:
             indices = [
                 self.random_choice_in_dataset(rng, d, c)
                 for c, d in zip(counts, datasets)
             ]
-            logger.info("got indices")
             return indices
 
         

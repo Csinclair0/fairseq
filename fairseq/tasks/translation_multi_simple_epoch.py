@@ -3,11 +3,13 @@
 
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
+import json
 import datetime
 import itertools
 import logging
 import time
+from argparse import Namespace
+
 
 import numpy as np
 import torch
@@ -19,9 +21,11 @@ from fairseq.data import (
     data_utils,
     iterators,
 )
+from fairseq import metrics, utils
 from fairseq.data.multilingual.multilingual_data_manager import (
     MultilingualDatasetManager,
 )
+from fairseq.data import encoders
 from fairseq.data.multilingual.multilingual_utils import LangTokStyle, get_lang_tok
 from fairseq.data.multilingual.sampling_method import SamplingMethod
 from fairseq.tasks import LegacyFairseqTask, register_task
@@ -45,20 +49,15 @@ logger = logging.getLogger(__name__)
 class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
     """
     Translate from one (source) language to another (target) language.
-
     Args:
         langs (List[str]): a list of languages that are being supported
         dicts (Dict[str, fairseq.data.Dictionary]): mapping from supported languages to their dictionaries
         training (bool): whether the task should be configured for training or not
-
     .. note::
-
         The translation task is compatible with :mod:`fairseq-train`,
         :mod:`fairseq-generate` and :mod:`fairseq-interactive`.
-
     The translation task provides the following additional command-line
     arguments:
-
     .. argparse::
         :ref: fairseq.tasks.translation_parser
         :prog:
@@ -79,6 +78,11 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                             help='keep language tokens in inference output (e.g. for analysis or debugging)')
         parser.add_argument('--one-dataset-per-batch', action='store_true',
                             help='limit each minibatch to one sub-dataset (typically lang direction)')
+        parser.add_argument('--eval-bleu', action='store_true')
+        parser.add_argument('--eval-bleu-remove-bpe', default = None)
+        parser.add_argument('--eval-bleu-print-samples', action = 'store_true')
+        parser.add_argument('--eval-bleu-detok', default = 'space')
+        parser.add_argument('--eval-bleu-args', default = '{}')
 
         SamplingMethod.add_arguments(parser)
         MultilingualDatasetManager.add_args(parser)
@@ -113,6 +117,8 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         )
         self.lang_idx = self.get_lang_idx()
         self.one_dataset_per_batch = getattr(args, "one_dataset_per_batch", False)
+        
+
 
     def get_lang_idx(self):
         lang_idx = torch.zeros(len(self.langs) + 1, dtype=torch.int32)
@@ -158,7 +164,6 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
 
     def load_dataset(self, split, epoch=1, combine=False, **kwargs):
         """Load a given dataset split.
-
         Args:
             split (str): name of the split (e.g., train, valid, test)
         """
@@ -245,10 +250,33 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         )
 
     def build_model(self, args, from_checkpoint=False):
-        return super().build_model(args, from_checkpoint)
+        model =  super().build_model(args, from_checkpoint)
+        if self.args.eval_bleu:
+            
+            detok_args =  {}
+            self.tokenizer = encoders.build_tokenizer(
+                Namespace(tokenizer=self.args.eval_bleu_detok, **detok_args)
+            )
+
+            gen_args = json.loads(self.args.eval_bleu_args)
+            self.sequence_generator = self.build_generator(
+                [model], Namespace(**gen_args)
+            )
+        return model
 
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
+        if self.args.eval_bleu:
+            EVAL_BLEU_ORDER = 4
+            bleu = self._inference_with_bleu(self.sequence_generator, sample, model)
+            logging_output["_bleu_sys_len"] = bleu.sys_len
+            logging_output["_bleu_ref_len"] = bleu.ref_len
+            # we split counts into separate entries so that they can be
+            # summed efficiently across workers using fast-stat-sync
+            assert len(bleu.counts) == EVAL_BLEU_ORDER
+            for i in range(EVAL_BLEU_ORDER):
+                logging_output["_bleu_counts_" + str(i)] = bleu.counts[i]
+                logging_output["_bleu_totals_" + str(i)] = bleu.totals[i]
         return loss, sample_size, logging_output
 
     def inference_step(
@@ -397,7 +425,6 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
     ):
         """
         Get an iterator that yields batches of data from the given dataset.
-
         Args:
             dataset (~fairseq.data.FairseqDataset): dataset to batch
             max_tokens (int, optional): max number of tokens in each batch
@@ -434,7 +461,6 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                 between sequence lengths among workers for batches sorted by length.
             update_epoch_batch_itr (bool optional): if true then donot use the cached
                 batch iterator for the epoch
-
         Returns:
             ~fairseq.iterators.EpochBatchIterator: a batched iterator over the
                 given dataset split
@@ -485,3 +511,36 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             skip_remainder_batch=skip_remainder_batch,
         )
         return epoch_iter
+
+    def _inference_with_bleu(self, generator, sample, model):
+        import sacrebleu
+
+        def decode(toks, escape_unk=False):
+            s = self.target_dictionary.string(
+                toks.int().cpu(),
+                self.args.eval_bleu_remove_bpe,
+                # The default unknown string in fairseq is `<unk>`, but
+                # this is tokenized by sacrebleu as `< unk >`, inflating
+                # BLEU scores. Instead, we use a somewhat more verbose
+                # alternative that is unlikely to appear in the real
+                # reference, but doesn't get split into multiple tokens.
+                unk_string=("UNKNOWNTOKENINREF" if escape_unk else "UNKNOWNTOKENINHYP"),
+            )
+            if self.tokenizer:
+                s = self.tokenizer.decode(s)
+            return s
+
+        gen_out = self.inference_step(generator, [model], sample, prefix_tokens=None)
+        hyps, refs = [], []
+        for i in range(len(gen_out)):
+            hyps.append(decode(gen_out[i][0]["tokens"]))
+            refs.append(
+                decode(
+                    utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
+                    escape_unk=True,  # don't count <unk> as matches to the hypo
+                )
+            )
+        if self.args.eval_bleu_print_samples:
+            logger.info("example hypothesis: " + hyps[0])
+            logger.info("example reference: " + refs[0])
+        return sacrebleu.corpus_bleu(hyps, [refs])
