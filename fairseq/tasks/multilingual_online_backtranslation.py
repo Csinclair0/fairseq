@@ -167,7 +167,9 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         if split == "train":
             dataset = self.load_train_dataset(data_path)
             self.datasets[split] = dataset
-
+        else:
+            # valid/test should always be the same.
+            super().load_dataset("valid")
 
 
     def load_train_dataset(self, data_path: str) -> FairseqDataset:
