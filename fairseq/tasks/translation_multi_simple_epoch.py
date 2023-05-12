@@ -355,7 +355,6 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                         total=meters["_bleu_totals"].sum,
                         sys_len=int(meters["_bleu_sys_len"].sum),
                         ref_len=int(meters["_bleu_ref_len"].sum),
-                        max_ngram_order = 2, 
                         **smooth,
                     )
                     return round(bleu.score, 2)
