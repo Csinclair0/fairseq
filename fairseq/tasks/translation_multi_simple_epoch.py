@@ -536,10 +536,10 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         gen_out = self.inference_step(generator, [model], sample, prefix_tokens=None)
         hyps, refs = [], []
         for i in range(len(gen_out)):
-            hyps.append(decode(gen_out[i][0]["tokens"]))
+            hyps.append(decode(gen_out[i][0]["tokens"][1:]))
             refs.append(
                 decode(
-                    utils.strip_pad(sample["target"][i], self.target_dictionary.pad()),
+                    utils.strip_pad(sample["target"][i][1:], self.target_dictionary.pad()),
                     escape_unk=True,  # don't count <unk> as matches to the hypo
                 )
             )
