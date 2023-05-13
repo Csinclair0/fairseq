@@ -79,6 +79,8 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                             help='back-translation weight')
         parser.add_argument('--lambda-dae', default="1.0", type=str, metavar='N',
                             help='denoising auto-encoder weight')
+        parser.add_argument('--lambda-main', default="1.0", type=str, metavar='N',
+                            help='denoising auto-encoder weight')
 
         # Evaluation args
         parser.add_argument('--generate-one-by-one', action='store_true',
@@ -119,6 +121,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         self.SHOW_SAMPLES_NUMBER = 5
         self.lambda_bt = PiecewiseLinearFn.from_string(args.lambda_bt)
         self.lambda_dae = PiecewiseLinearFn.from_string(args.lambda_dae)
+        self.lambda_main = PiecewiseLinearFn.from_string(args.lambda_main)
 
 
 
@@ -382,7 +385,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         weights = {
             "BT": self.lambda_bt(update_num),
             "DENOISE": self.lambda_dae(update_num),
-            "MAIN": 1.0 
+            "MAIN": self.lambda_main(update_num) 
         }
         log_keys = {"BT": "bt_", "DENOISE": "dae_", "MAIN" : "main_"}
 

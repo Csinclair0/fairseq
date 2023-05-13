@@ -288,9 +288,19 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             _, tgt_langtok_spec = self.args.langtoks["main"]
             if not self.args.lang_tok_replacing_bos_eos:
                 if prefix_tokens is None and tgt_langtok_spec:
-                    src_tokens = sample["net_input"]["src_tokens"]
-                    bsz = src_tokens.size(0)
-                    prefix_tokens = sample["net_input"]["prev_output_tokens"][:, 1].reshape(bsz, 1)
+                    try:
+                        tgt_lang_tok = self.data_manager.get_decoder_langtok(
+                        self.args.target_lang, tgt_langtok_spec
+                        )
+                        src_tokens = sample["net_input"]["src_tokens"]
+                        bsz = src_tokens.size(0)
+                        prefix_tokens = (
+                            torch.LongTensor([[tgt_lang_tok]]).expand(bsz, 1).to(src_tokens)
+                        )
+                    except KeyError:
+                        src_tokens = sample["net_input"]["src_tokens"]
+                        bsz = src_tokens.size(0)
+                        prefix_tokens = sample["net_input"]["prev_output_tokens"][:, 1].reshape(bsz, 1)
                 return generator.generate(
                     models,
                     sample,
