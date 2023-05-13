@@ -82,6 +82,10 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                             help='denoising auto-encoder weight')
         parser.add_argument('--lambda-main', default="1.0", type=str, metavar='N',
                             help='denoising auto-encoder weight')
+        
+
+        parser.add_argument('--mono-tepm', default="1.0", type=str, metavar='N',
+                            help='temperature sampling for monolingual data')
 
         # Evaluation args
         parser.add_argument('--generate-one-by-one', action='store_true',
@@ -191,7 +195,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
             bt_data.append(self.load_bt_dataset(train_path, lang))
             denoise_data.append(self.load_denoise_dataset(train_path, lang))
         sizes = [len(d) for d in bt_data]
-        sampling_ratios = temperature_sampling(sizes, "2.5")
+        sampling_ratios = temperature_sampling(sizes, self.args.mono_temp)
         data.append(("all-BT", SampledMultiEpochDataset(bt_data, sampling_ratios=sampling_ratios )))
         data.append(("all-DENOISE", SampledMultiEpochDataset(denoise_data, sampling_ratios=sampling_ratios)))
         return RoundRobinZipDatasets(OrderedDict(data))
