@@ -188,10 +188,8 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
             train_path = os.path.join(data_path, lang, "train")
             # TODO: could we do the BT using denoise sample ?
             # this would half the data loading work
-            bt_data.append((f"{lang}-BT", self.load_bt_dataset(train_path, lang)))
-            denoise_data.append(
-                (f"{lang}-DENOISE", self.load_denoise_dataset(train_path, lang))
-            )
+            bt_data.append(self.load_bt_dataset(train_path, lang))
+            denoise_data.append(self.load_denoise_dataset(train_path, lang))
         
         data.append(("all-BT", SampledMultiEpochDataset(bt_data)))
         data.append(("all-DENOISE", SampledMultiEpochDataset(denoise_data)))
