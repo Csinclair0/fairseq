@@ -30,7 +30,7 @@ from fairseq.data.multilingual.multilingual_data_manager import (
     MultilingualDatasetManager,
 )
 
-from fairseq.data.multilingual.sampling_method import SamplingMethod
+from fairseq.data.multilingual.sampling_method import SamplingMethod, temperature_sampling
 from fairseq.tasks.online_backtranslation import PiecewiseLinearFn
 from fairseq.tasks.translation_multi_simple_epoch import TranslationMultiSimpleEpochTask
 from fairseq.utils import FileContentsAction
@@ -190,9 +190,10 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
             # this would half the data loading work
             bt_data.append(self.load_bt_dataset(train_path, lang))
             denoise_data.append(self.load_denoise_dataset(train_path, lang))
-        
-        data.append(("all-BT", SampledMultiEpochDataset(bt_data)))
-        data.append(("all-DENOISE", SampledMultiEpochDataset(denoise_data)))
+        sizes = [len(d) for d in bt_data]
+        sampling_ratios = temperature_sampling(sizes, "2.5")
+        data.append(("all-BT", SampledMultiEpochDataset(bt_data, sampling_ratios=sampling_ratios )))
+        data.append(("all-DENOISE", SampledMultiEpochDataset(denoise_data, sampling_ratios=sampling_ratios)))
         return RoundRobinZipDatasets(OrderedDict(data))
     
 
