@@ -407,7 +407,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
 
             # Like in FairseqTask.train_step
             with torch.autograd.profiler.record_function("forward"):
-                loss, sample_size, logging_output = criterion(model, smp)
+                loss, sample_size, logging_output = criterion(model, smp, teacher_model=teacher_model)
             loss *= weights[task_subtype]
             if ignore_grad:
                 loss *= 0
