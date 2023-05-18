@@ -109,6 +109,8 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                                  'e.g., \'{"beam": 4, "lenpen": 0.6}\'')
         parser.add_argument('--eval-bleu-print-samples', action='store_true',
                             help='print sample generations during validation')
+        parser.add_argument('--use-teacher', action='store_true',
+                            help='use teacher for backtranslation')
   
         
         SamplingMethod.add_arguments(parser)
@@ -377,7 +379,6 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
 
         model.train()
         model.set_num_updates(update_num)
-
         agg_loss, agg_sample_size = 0.0, 0.0
         agg_logging_output: Dict[str, float] = defaultdict(float)
         
@@ -401,7 +402,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                 with torch.autograd.profiler.record_function("backtranslation"):
                     model.eval()
                     other_lang = self.get_other_lang("all")
-                    self.backtranslate_sample(smp, other_lang, model)
+                    self.backtranslate_sample(smp, other_lang, model if not self.use_teacher else teacher_model)
                     self.display_samples_once_in_a_while(smp)
                     model.train()
 
