@@ -129,6 +129,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         self.lambda_bt = PiecewiseLinearFn.from_string(args.lambda_bt)
         self.lambda_dae = PiecewiseLinearFn.from_string(args.lambda_dae)
         self.lambda_main = PiecewiseLinearFn.from_string(args.lambda_main)
+        self.use_teacher = args.use_teacher
 
 
 
