@@ -175,20 +175,21 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
             split (str): name of the split (e.g., train, valid, test)
         """
         data_path = self.data[0]
-        if split == "train":
-            dataset = self.load_train_dataset(data_path)
-            self.datasets[split] = dataset
+        train_subset = getattr(self.args, "train_subset", None)
+        if split == train_subset:
+            dataset = self.load_train_dataset(data_path, train_subset)
+            self.datasets[train_subset] = dataset
         else:
             # valid/test should always be the same.
             super().load_dataset("valid")
 
 
-    def load_train_dataset(self, data_path: str) -> FairseqDataset:
+    def load_train_dataset(self, data_path: str, train_subset: str) -> FairseqDataset:
         """The training dataset is made of backtranslation dataset and denoising dataset."""
-        super().load_dataset("train")
+        super().load_dataset(train_subset)
         
         data = []
-        data.append((f"all-MAIN", self.datasets["train"]))
+        data.append((f"all-MAIN", self.datasets[train_subset]))
         bt_data = []
         denoise_data = [] 
         for lang in self.mono_langs:
@@ -383,8 +384,8 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         agg_loss, agg_sample_size = 0.0, 0.0
         agg_logging_output: Dict[str, float] = defaultdict(float)
         
-        
-        dataset_keys = self.datasets["train"].datasets.keys()
+        train_subset = getattr(self.args, "train_subset", None)
+        dataset_keys = self.datasets[train_subset].datasets.keys()
     
         weights = {
             "BT": self.lambda_bt(update_num),
