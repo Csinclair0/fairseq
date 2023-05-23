@@ -27,13 +27,13 @@ class AMPOptimizer(optim.FairseqOptimizer):
         self.min_loss_scale = cfg.common.min_loss_scale
 
     @classmethod
-    def build_optimizer(cls, cfg: DictConfig, params, **kwargs):
+    def build_optimizer(cls, cfg: DictConfig, params, ds = False, **kwargs):
         """
         Args:
             cfg (omegaconf.DictConfig): fairseq args
             params (iterable): iterable of parameters to optimize
         """
-        fp32_optimizer = optim.build_optimizer(cfg.optimizer, params)
+        fp32_optimizer = optim.build_optimizer(cfg.optimizer, params, ds=ds)
         return cls(cfg, params, fp32_optimizer, **kwargs)
 
     def backward(self, loss):
@@ -63,8 +63,9 @@ class AMPOptimizer(optim.FairseqOptimizer):
                     ).format(self.min_loss_scale, new_loss_scale)
                 )
             else:
-                logger.info("AMP: overflow detected, setting scale to "
-                            f"to {new_loss_scale}")
+                logger.info(
+                    "AMP: overflow detected, setting scale to " f"to {new_loss_scale}"
+                )
         return grad_norm
 
     @property

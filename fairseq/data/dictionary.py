@@ -1,6 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
 import os
@@ -8,11 +9,20 @@ from collections import Counter
 from multiprocessing import Pool
 
 import torch
+
 from fairseq import utils
 from fairseq.data import data_utils
 from fairseq.file_chunker_utils import Chunker, find_offsets
 from fairseq.file_io import PathManager
 from fairseq.tokenizer import tokenize_line
+
+try:
+    use_s3 = os.environ.get("USE_S3_DATALOADER", "0")
+    if use_s3 == "1":
+        from smart_open import open 
+except ImportError:
+    use_s3 = "0" 
+
 
 
 class Dictionary:
@@ -92,7 +102,8 @@ class Dictionary:
             )
 
         extra_symbols_to_ignore = set(extra_symbols_to_ignore or [])
-        extra_symbols_to_ignore.add(self.eos())
+        if not include_eos:
+            extra_symbols_to_ignore.add(self.eos())
 
         def token_string(i):
             if i == self.unk():
@@ -231,8 +242,12 @@ class Dictionary:
         to this instance.
         """
         if isinstance(f, str):
+            if use_s3 == "1":
+                path = f"s3://{f}"
+            else:
+                path = PathManager.get_local_path(f)
             try:
-                with open(PathManager.get_local_path(f), "r", encoding="utf-8") as fd:
+                with open(path, "r", encoding="utf-8") as fd:
                     self.add_from_file(fd)
             except FileNotFoundError as fnfe:
                 raise fnfe
@@ -267,7 +282,7 @@ class Dictionary:
                 self.add_symbol(word, n=count, overwrite=overwrite)
             except ValueError:
                 raise ValueError(
-                    "Incorrect dictionary format, expected '<token> <cnt> [flags]'"
+                    f"Incorrect dictionary format, expected '<token> <cnt> [flags]': \"{line}\""
                 )
 
     def _save(self, f, kv_iterator):
@@ -312,20 +327,19 @@ class Dictionary:
         words = line_tokenizer(line)
         if reverse_order:
             words = list(reversed(words))
-        nwords = len(words)
-        ids = torch.IntTensor(nwords + 1 if append_eos else nwords)
+        ids = []
 
-        for i, word in enumerate(words):
+        for word in words:
             if add_if_not_exist:
                 idx = self.add_symbol(word)
             else:
                 idx = self.index(word)
             if consumer is not None:
                 consumer(word, idx)
-            ids[i] = idx
+            ids.append(idx)
         if append_eos:
-            ids[nwords] = self.eos_index
-        return ids
+            ids.append(self.eos_index)
+        return torch.tensor(ids, dtype=torch.int32)
 
     @staticmethod
     def _add_file_to_dictionary_single_worker(

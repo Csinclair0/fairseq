@@ -1,6 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 """isort:skip_file"""
 
@@ -27,9 +28,9 @@ sys.modules["fairseq.progress_bar"] = progress_bar
 
 # initialize hydra
 from fairseq.dataclass.initialize import hydra_init
+
 hydra_init()
 
-import fairseq.criterions  # noqa
 import fairseq.distributed  # noqa
 import fairseq.models  # noqa
 import fairseq.modules  # noqa

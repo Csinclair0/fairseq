@@ -1,4 +1,7 @@
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
 import os
@@ -49,10 +52,12 @@ class TestFileIO(unittest.TestCase):
     def test_file_io_async(self):
         # ioPath `PathManager` is initialized after the first `opena` call.
         try:
-            from fairseq.file_io import IOPathManager, PathManager
+            from fairseq.file_io import PathManager
+
             _asyncfile = os.path.join(self._tmpdir, "async.txt")
             f = PathManager.opena(_asyncfile, "wb")
             f.close()
 
+            self.assertIsNotNone(PathManager)
         finally:
             self.assertTrue(PathManager.async_close())

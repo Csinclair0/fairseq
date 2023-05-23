@@ -1,11 +1,13 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
 import logging
 
 import torch.nn as nn
+
 from fairseq.model_parallel.modules import (
     ModelParallelTransformerDecoderLayer,
     ModelParallelTransformerEncoderLayer,
@@ -17,12 +19,11 @@ from fairseq.models.transformer import (
     TransformerModel,
 )
 
-
 try:
     from fairseq.model_parallel.megatron.mpu import (
+        VocabParallelEmbedding,
         copy_to_model_parallel_region,
         gather_from_model_parallel_region,
-        VocabParallelEmbedding,
     )
 
     has_megatron_submodule = True
@@ -52,7 +53,7 @@ class ModelParallelTransformerModel(TransformerModel):
         padding_idx = dictionary.pad()
 
         def _vocab_init(tensor, **kwargs):
-            nn.init.normal_(tensor, mean=0, std=num_embeddings ** -0.5)
+            nn.init.normal_(tensor, mean=0, std=num_embeddings**-0.5)
             nn.init.constant_(tensor[1], 0)
 
         emb = VocabParallelEmbedding(
@@ -101,7 +102,7 @@ class ModelParallelTransformerDecoder(TransformerDecoder):
     is a :class:`ModelParallelTransformerDecoderLayer`.
     """
 
-    def build_decoder_layer(self, args, no_encoder_attn=False):
+    def build_decoder_layer(self, args, no_encoder_attn=False, is_moe_layer=False):
         return ModelParallelTransformerDecoderLayer(args, no_encoder_attn)
 
     def output_layer(self, features, **kwargs):

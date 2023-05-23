@@ -1,6 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
 import logging
@@ -10,19 +11,21 @@ from argparse import Namespace
 from typing import Any, Callable, Dict, List
 
 import torch
+from omegaconf import DictConfig
+
 from fairseq import metrics, search, tokenizer, utils
 from fairseq.data import Dictionary, FairseqDataset, data_utils, encoders, iterators
 from fairseq.dataclass import FairseqDataclass
 from fairseq.dataclass.utils import gen_parser_from_dataclass
 from fairseq.optim.amp_optimizer import AMPOptimizer
 from omegaconf import DictConfig
+from deepspeed import DeepSpeedOptimizer
 
 
 logger = logging.getLogger(__name__)
 
 
 class StatefulContainer(object):
-
     def __init__(self):
         self._state = dict()
         self._factories = dict()
@@ -135,7 +138,7 @@ class FairseqTask(object):
         split: str,
         combine: bool = False,
         task_cfg: FairseqDataclass = None,
-        **kwargs
+        **kwargs,
     ):
         """Load a given dataset split.
 
@@ -207,7 +210,7 @@ class FairseqTask(object):
 
     def get_batch_iterator(
         self,
-        dataset,
+        dataset: FairseqDataset,
         max_tokens=None,
         max_sentences=None,
         max_positions=None,
@@ -220,6 +223,10 @@ class FairseqTask(object):
         epoch=1,
         data_buffer_size=0,
         disable_iterator_cache=False,
+        skip_remainder_batch=False,
+        grouped_shuffling=False,
+        update_epoch_batch_itr=False,
+        batch_by_size=True,
     ):
         """
         Get an iterator that yields batches of data from the given dataset.
@@ -252,12 +259,25 @@ class FairseqTask(object):
             disable_iterator_cache (bool, optional): don't cache the
                 EpochBatchIterator (ignores `FairseqTask::can_reuse_epoch_itr`)
                 (default: False).
+            skip_remainder_batch (bool, optional): if set, discard the last
+                batch in each training epoch, as the last batch is often smaller than
+                    local_batch_size * distributed_word_size (default: ``True``).
+            grouped_shuffling (bool, optional): group batches with each groups
+                containing num_shards batches and shuffle groups. Reduces difference
+                between sequence lengths among workers for batches sorted by length.
+            update_epoch_batch_itr (bool optional): if true then donot use the cached
+                batch iterator for the epoch
+            batch_by_size (bool, optional):
+                batch sequences of similar length together to reduce padding.
+                If false, each batch will be of size max_sentences.
         Returns:
             ~fairseq.iterators.EpochBatchIterator: a batched iterator over the
                 given dataset split
         """
-        can_reuse_epoch_itr = not disable_iterator_cache and self.can_reuse_epoch_itr(
-            dataset
+        can_reuse_epoch_itr = (
+            not disable_iterator_cache
+            and not update_epoch_batch_itr
+            and self.can_reuse_epoch_itr(dataset)
         )
         if can_reuse_epoch_itr and dataset in self.dataset_to_epoch_iter:
             logger.debug("reusing EpochBatchIterator for epoch {}".format(epoch))
@@ -275,17 +295,23 @@ class FairseqTask(object):
         # filter examples that are too large
         if max_positions is not None:
             indices = self.filter_indices_by_size(
-                indices, dataset, max_positions, ignore_invalid_inputs
+                indices, dataset, max_positions  , ignore_invalid_inputs
             )
 
-        # create mini-batches with given size constraints
-        batch_sampler = dataset.batch_by_size(
-            indices,
-            max_tokens=max_tokens,
-            max_sentences=max_sentences,
-            required_batch_size_multiple=required_batch_size_multiple,
-        )
-
+        if batch_by_size:
+            # create mini-batches with given size constraints
+            batch_sampler = dataset.batch_by_size(
+                indices,
+                max_tokens=max_tokens,
+                max_sentences=max_sentences,
+                required_batch_size_multiple=required_batch_size_multiple,
+            )
+        else:
+            assert (
+                max_sentences is not None
+            ), "If batch_by_size=False, max_sentences must be passed. Got None"
+            starts = indices[::max_sentences]
+            batch_sampler = [indices[s : s + max_sentences] for s in starts]
         # return a reusable, sharded iterator
         epoch_iter = iterators.EpochBatchIterator(
             dataset=dataset,
@@ -297,6 +323,8 @@ class FairseqTask(object):
             num_workers=num_workers,
             epoch=epoch,
             buffer_size=data_buffer_size,
+            skip_remainder_batch=skip_remainder_batch,
+            grouped_shuffling=grouped_shuffling,
         )
 
         if can_reuse_epoch_itr:
@@ -304,7 +332,7 @@ class FairseqTask(object):
 
         return epoch_iter
 
-    def build_model(self, cfg: FairseqDataclass):
+    def build_model(self, cfg: FairseqDataclass, from_checkpoint=False):
         """
         Build the :class:`~fairseq.models.BaseFairseqModel` instance for this
         task.
@@ -317,7 +345,7 @@ class FairseqTask(object):
         """
         from fairseq import models, quantization_utils
 
-        model = models.build_model(cfg, self)
+        model = models.build_model(cfg, self, from_checkpoint)
         model = quantization_utils.quantize_model_scalar(model, cfg)
         return model
 
@@ -337,7 +365,12 @@ class FairseqTask(object):
         return criterions.build_criterion(cfg, self)
 
     def build_generator(
-        self, models, args, seq_gen_cls=None, extra_gen_cls_kwargs=None, prefix_allowed_tokens_fn=None,
+        self,
+        models,
+        args,
+        seq_gen_cls=None,
+        extra_gen_cls_kwargs=None,
+        prefix_allowed_tokens_fn=None,
     ):
         """
         Build a :class:`~fairseq.SequenceGenerator` instance for this
@@ -369,6 +402,7 @@ class FairseqTask(object):
             return SequenceScorer(
                 self.target_dictionary,
                 compute_alignment=getattr(args, "print_alignment", False),
+                compute_vocab_dist=getattr(args, "compute_vocab_dist", False),
             )
 
         from fairseq.sequence_generator import (
@@ -463,7 +497,7 @@ class FairseqTask(object):
         )
 
     def train_step(
-        self, sample, model, criterion, optimizer, update_num, ignore_grad=False
+        self, sample, model, criterion, optimizer, update_num, ignore_grad=False, teacher_model=None
     ):
         """
         Do forward and backward, and return the loss as computed by *criterion*
@@ -489,11 +523,14 @@ class FairseqTask(object):
         model.set_num_updates(update_num)
         with torch.autograd.profiler.record_function("forward"):
             with torch.cuda.amp.autocast(enabled=(isinstance(optimizer, AMPOptimizer))):
-                loss, sample_size, logging_output = criterion(model, sample)
+                loss, sample_size, logging_output = criterion(model, sample, teacher_model=teacher_model)
         if ignore_grad:
             loss *= 0
         with torch.autograd.profiler.record_function("backward"):
-            optimizer.backward(loss)
+            if isinstance(optimizer, DeepSpeedOptimizer):
+                model.backward(loss)
+            else:
+                optimizer.backward(loss)
         return loss, sample_size, logging_output
 
     def valid_step(self, sample, model, criterion):
@@ -503,7 +540,10 @@ class FairseqTask(object):
         return loss, sample_size, logging_output
 
     def optimizer_step(self, optimizer, model, update_num):
-        optimizer.step()
+        if isinstance(optimizer, DeepSpeedOptimizer):
+            model.step()
+        else:
+            optimizer.step()
 
     def build_dataset_for_inference(
         self, src_tokens: List[torch.Tensor], src_lengths: List[int], **kwargs
@@ -635,7 +675,7 @@ class LegacyFairseqTask(FairseqTask):
     def has_sharded_data(self, split):
         return os.pathsep in getattr(self.args, "data", "")
 
-    def build_model(self, args: Namespace):
+    def build_model(self, args: Namespace, from_checkpoint=False):
         """
         Build the :class:`~fairseq.models.BaseFairseqModel` instance for this
         task.
@@ -648,7 +688,7 @@ class LegacyFairseqTask(FairseqTask):
         """
         from fairseq import models, quantization_utils
 
-        model = models.build_model(args, self)
+        model = models.build_model(args, self, from_checkpoint)
         model = quantization_utils.quantize_model_scalar(model, args)
         return model
 

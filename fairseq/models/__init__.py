@@ -1,16 +1,18 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 """isort:skip_file"""
 
 import argparse
 import importlib
 import os
+
 from contextlib import ExitStack
 
 from fairseq.dataclass import FairseqDataclass
-from fairseq.dataclass.utils import merge_with_parent, populate_dataclass
+from fairseq.dataclass.utils import merge_with_parent
 from hydra.core.config_store import ConfigStore
 from omegaconf import open_dict, OmegaConf
 
@@ -52,7 +54,7 @@ __all__ = [
 ]
 
 
-def build_model(cfg: FairseqDataclass, task):
+def build_model(cfg: FairseqDataclass, task, from_checkpoint=False):
 
     model = None
     model_type = getattr(cfg, "_name", None) or getattr(cfg, "arch", None)
@@ -82,11 +84,10 @@ def build_model(cfg: FairseqDataclass, task):
     if model_type in MODEL_DATACLASS_REGISTRY:
         # set defaults from dataclass. note that arch name and model name can be the same
         dc = MODEL_DATACLASS_REGISTRY[model_type]
-
         if isinstance(cfg, argparse.Namespace):
-            cfg = populate_dataclass(dc(), cfg)
+            cfg = dc.from_namespace(cfg)
         else:
-            cfg = merge_with_parent(dc(), cfg)
+            cfg = merge_with_parent(dc(), cfg, from_checkpoint)
     else:
         if model_type in ARCH_CONFIG_REGISTRY:
             with open_dict(cfg) if OmegaConf.is_config(cfg) else ExitStack():
@@ -98,12 +99,11 @@ def build_model(cfg: FairseqDataclass, task):
 
     assert model is not None, (
         f"Could not infer model type from {cfg}. "
-        "Available models: {}".format(
-            MODEL_DATACLASS_REGISTRY.keys()
-        )
-        + f" Requested model type: {model_type}"
+        f"Available models: "
+        + str(MODEL_DATACLASS_REGISTRY.keys())
+        + " Requested model type: "
+        + model_type
     )
-
     return model.build_model(cfg, task)
 
 

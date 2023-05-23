@@ -1,6 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
 import contextlib
@@ -8,7 +9,7 @@ import json
 import logging
 import math
 import os
-from argparse import Namespace
+from argparse import ArgumentError, Namespace
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 from typing import Dict, Sequence, Tuple
@@ -110,10 +111,14 @@ class OnlineBackTranslationTask(TranslationTask):
                             help='pad the target on the left')
         parser.add_argument('--upsample-primary', default=1, type=int,
                             help='amount to upsample primary dataset')
-        parser.add_argument('--max-source-positions', default=1024, type=int, metavar='N',
-                            help='max number of tokens in the source sequence')
-        parser.add_argument('--max-target-positions', default=1024, type=int, metavar='N',
-                            help='max number of tokens in the target sequence')
+        try:
+            parser.add_argument('--max-source-positions', default=1024, type=int, metavar='N',
+                                help='max number of tokens in the source sequence')
+            parser.add_argument('--max-target-positions', default=1024, type=int, metavar='N',
+                                help='max number of tokens in the target sequence')
+        except ArgumentError:
+            # this might have already been defined. Once we transition this to hydra it should be fine to add it here.
+            pass
         parser.add_argument('--truncate-source', action='store_true', default=False,
                             help='truncate source to max-source-positions')
         parser.add_argument('--num-batch-buckets', default=0, type=int, metavar='N',
@@ -157,6 +162,8 @@ class OnlineBackTranslationTask(TranslationTask):
                                  'e.g., \'{"beam": 4, "lenpen": 0.6}\'')
         parser.add_argument('--eval-bleu-print-samples', action='store_true',
                             help='print sample generations during validation')
+        parser.add_argument('--pad-to-fixed-length', default=False, type=bool,
+                            help='pad batch to fixed sequence length')
         # fmt: on
 
     def __init__(self, args, common_dict, mono_langs, valid_lang_pairs):
@@ -349,9 +356,9 @@ class OnlineBackTranslationTask(TranslationTask):
     def build_dataset_for_inference(self, src_tokens, src_lengths, constraints=None):
         raise NotImplementedError
 
-    def build_model(self, args):
+    def build_model(self, args, from_checkpoint=False):
         # torch.autograd.set_detect_anomaly(True)
-        model = super().build_model(args)
+        model = super().build_model(args, from_checkpoint)
 
         add_secial_tokens_to_dict_and_model(self.common_dict, model, self.mono_langs)
 

@@ -1,9 +1,11 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import collections
 import contextlib
 import copy
 import importlib
@@ -12,13 +14,16 @@ import os
 import sys
 import warnings
 from itertools import accumulate
-from typing import Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
+import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
-from fairseq.modules.multihead_attention import MultiheadAttention
 from torch import Tensor
 
+if TYPE_CHECKING:
+    from fairseq.modules.multihead_attention import MultiheadAttention
 
 try:
     from amp_C import multi_tensor_l2norm
@@ -56,6 +61,20 @@ class FileContentsAction(argparse.Action):
         setattr(namespace, self.dest, argument)
 
 
+class CSVFileContentsAction(FileContentsAction):
+    def __init__(self, option_strings, dest, nargs=None, **kwargs):
+        if nargs is not None:
+            raise ValueError("nargs not allowed")
+        super(CSVFileContentsAction, self).__init__(option_strings, dest, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        super(CSVFileContentsAction, self).__call__(
+            parser, namespace, values, option_string
+        )
+        argument = getattr(namespace, self.dest).split(",")
+        setattr(namespace, self.dest, argument)
+
+
 def split_paths(paths: str, separator=os.pathsep) -> List[str]:
     return (
         paths.split(separator) if "://" not in paths else paths.split(MANIFOLD_PATH_SEP)
@@ -81,6 +100,13 @@ def apply_to_sample(f, sample):
     def _apply(x):
         if torch.is_tensor(x):
             return f(x)
+        elif isinstance(x, collections.OrderedDict):
+            # OrderedDict has attributes that needs to be preserved
+            od = collections.OrderedDict(
+                (key, _apply(value)) for key, value in x.items()
+            )
+            od.__dict__ = x.__dict__
+            return od
         elif isinstance(x, dict):
             return {key: _apply(value) for key, value in x.items()}
         elif isinstance(x, list):
@@ -106,11 +132,11 @@ def move_to_cuda(sample, device=None):
     return apply_to_sample(_move_to_cuda, sample)
 
 
-def move_to_cpu(sample):
+def move_to_cpu(sample, cast_to_fp32=True):
     def _move_to_cpu(tensor):
         # PyTorch has poor support for half tensors (float16) on CPU.
         # Move any such tensors to float32.
-        if tensor.dtype in {torch.bfloat16, torch.float16}:
+        if cast_to_fp32 and tensor.dtype in {torch.bfloat16, torch.float16}:
             tensor = tensor.to(dtype=torch.float32)
         return tensor.cpu()
 
@@ -130,7 +156,7 @@ def move_to_tpu(sample):
 
 
 def get_incremental_state(
-    module: MultiheadAttention,
+    module: "MultiheadAttention",
     incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]],
     key: str,
 ) -> Optional[Dict[str, Optional[Tensor]]]:
@@ -139,7 +165,7 @@ def get_incremental_state(
 
 
 def set_incremental_state(
-    module: MultiheadAttention,
+    module: "MultiheadAttention",
     incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]],
     key: str,
     value: Dict[str, Optional[Tensor]],
@@ -257,6 +283,10 @@ def make_positions(tensor, padding_idx: int, onnx_trace: bool = False):
     return (torch.cumsum(mask, dim=1).type_as(mask) * mask).long() + padding_idx
 
 
+def assert_equal(a, b, msg=""):
+    assert a == b, f"{msg}{a} != {b}"
+
+
 def strip_pad(tensor, pad):
     return tensor[tensor.ne(pad)]
 
@@ -342,20 +372,23 @@ def clip_grad_norm_(params, max_norm, aggregate_norm_fn=None) -> torch.Tensor:
     if isinstance(params, torch.Tensor):
         params = [params]
     params = list(params)
-    grads = [
-        p.grad.detach() for p in params if grad_exists(p) and not hasattr(p, "expert")
-    ]
-    expert_grads = [
-        p.grad.detach() for p in params if grad_exists(p) and hasattr(p, "expert")
-    ]
-
+    params = list(filter(grad_exists, params))
+    grads, expert_grads, base_expert_grads, sharded_grads = [], [], [], []
+    for p in params:
+        if hasattr(p, "expert"):
+            expert_grads.append(p.grad.detach())
+        elif hasattr(p, "base_expert"):
+            base_expert_grads.append(p.grad.detach())
+        elif hasattr(p, "_is_sharded"):
+            sharded_grads.append(p.grad.detach())
+        else:
+            grads.append(p.grad.detach())
     if len(grads) == 0:
         if len(params) > 0:
-            return params[0].new_tensor(0.0)
+            total_norm = params[0].new_tensor(0.0)
         else:
-            return torch.tensor(0.0)
-
-    if len(grads) == 1:
+            total_norm = torch.tensor(0.0)
+    elif len(grads) == 1:
         total_norm = torch.norm(grads[0], p=2, dtype=torch.float32)
     else:
         if multi_tensor_l2norm_available:
@@ -377,13 +410,30 @@ def clip_grad_norm_(params, max_norm, aggregate_norm_fn=None) -> torch.Tensor:
                 )
             )
 
+    # calculate split_norm and all_reduce with other workers
+    norms = [total_norm]
+    for split_grads in [expert_grads, sharded_grads]:
+        if len(split_grads) == 0:
+            continue
+        split_norm = torch.norm(
+            torch.stack([torch.norm(g, p=2, dtype=torch.float32) for g in split_grads])
+        )
+        if dist.is_initialized():
+            split_norm.pow_(2)
+            dist.all_reduce(split_norm)
+            split_norm.sqrt_()
+        norms.append(split_norm)
+
+    if len(norms) > 1:
+        total_norm = torch.norm(torch.stack(norms))
+
     if aggregate_norm_fn is not None:
         total_norm = aggregate_norm_fn(total_norm)
 
     if max_norm > 0:
         max_norm = float(max_norm)
         clip_coef = (max_norm / (total_norm + 1e-6)).clamp_(max=1)
-        for g in grads + expert_grads:
+        for g in grads + expert_grads + sharded_grads + base_expert_grads:
             g.mul_(clip_coef)
     return total_norm
 
@@ -492,6 +542,8 @@ def import_user_module(args):
                     from fairseq.models import import_models
 
                     import_models(models_path, f"{module_name}.models")
+            elif module_path in sys.modules[module_name].__path__:
+                logger.info(f"--user-dir={module_path} has already been imported.")
             else:
                 raise ImportError(
                     "Failed to import --user-dir={} because the corresponding module name "
@@ -520,7 +572,7 @@ def get_perplexity(loss, round=2, base=2):
     if loss is None:
         return 0.0
     try:
-        return safe_round(base ** loss, round)
+        return safe_round(base**loss, round)
     except OverflowError:
         return float("inf")
 
@@ -530,12 +582,18 @@ def deprecation_warning(message, stacklevel=3):
     warnings.warn(message, stacklevel=stacklevel)
 
 
+def relu_squared(x: torch.Tensor):
+    return F.relu(x).pow(2)
+
+
 def get_activation_fn(activation: str) -> Callable:
     """Returns the activation function corresponding to `activation`"""
     from fairseq.modules import gelu, gelu_accurate, silu
 
     if activation == "relu":
         return F.relu
+    elif activation == "relu_squared":
+        return relu_squared
     elif activation == "gelu":
         return gelu
     elif activation == "gelu_fast":
@@ -549,6 +607,8 @@ def get_activation_fn(activation: str) -> Callable:
         return torch.tanh
     elif activation == "linear":
         return lambda x: x
+    elif activation == "swish":
+        return torch.nn.SiLU
     elif activation == "silu":
         return F.silu
     else:
@@ -558,6 +618,7 @@ def get_activation_fn(activation: str) -> Callable:
 def get_available_activation_fns() -> List:
     return [
         "relu",
+        "relu_squared",
         "gelu",
         "gelu_fast",  # deprecated
         "gelu_accurate",
@@ -700,6 +761,7 @@ def get_tpu_device():
 def tpu_data_loader(itr):
     import torch_xla.core.xla_model as xm
     import torch_xla.distributed.parallel_loader as pl
+
     from fairseq.data import iterators
 
     xm.rendezvous("tpu_data_loader")  # wait for all workers
@@ -808,3 +870,45 @@ def reset_logging():
         )
     )
     root.addHandler(handler)
+
+
+def safe_getattr(obj, k, default=None):
+    """Returns obj[k] if it exists and is not None, otherwise returns default."""
+    from omegaconf import OmegaConf
+
+    if OmegaConf.is_config(obj):
+        return obj[k] if k in obj and obj[k] is not None else default
+
+    return getattr(obj, k, default)
+
+
+def safe_hasattr(obj, k):
+    """Returns True if the given key exists and is not None."""
+    return getattr(obj, k, None) is not None
+
+
+def print_r0(x, file=None):
+    if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
+        print(x, file=file, flush=True)
+
+
+def round_safe(x):
+    if torch.is_tensor(x):
+        return float(np.round(x.cpu().numpy(), 4))
+    else:
+        try:
+            return round(x, 4)
+        except Exception:
+            return x
+
+
+def print_mem(msg):
+    gb_denom = 1024**3
+    mem_info = f"max_GB: {torch.cuda.max_memory_allocated()/gb_denom:.1f}, current_GB: {torch.cuda.memory_allocated()/gb_denom:.1f}"
+    print_r0(f"{msg}: {mem_info}")
+
+
+def remove_prefix(text: str, prefix: str):
+    if text.startswith(prefix):
+        return text[len(prefix) :]
+    return text

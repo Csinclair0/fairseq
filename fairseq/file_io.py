@@ -1,37 +1,36 @@
 #!/usr/bin/env python3
 
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import boto3
+import errno
+import json
 import logging
 import os
 import shutil
 from typing import List, Optional
 
+import torch
 
 logger = logging.getLogger(__file__)
 
-
 try:
-    from iopath.common.file_io import g_pathmgr as IOPathManager
-
-    try:
-        # [FB only - for now] AWS PathHandler for PathManager
-        from .fb_pathhandlers import S3PathHandler
-
-        IOPathManager.register_handler(S3PathHandler())
-    except KeyError:
-        logging.warning("S3PathHandler already registered.")
-    except ImportError:
-        logging.debug(
-            "S3PathHandler couldn't be imported. Either missing fb-only files, or boto3 module."
-        )
-
+    use_s3 = os.environ.get("USE_S3_DATALOADER", "0")
+    if use_s3:
+        from iopath.common.s3 import S3PathHandler
+        IOPathManager = S3PathHandler()
+        logging.warning("Setting Path manager as S3")
+    else:
+        use_s3 = "0" 
+        IOPathManager = None 
 except ImportError:
+    use_s3 = "0" 
     IOPathManager = None
-
+    
 
 class PathManager:
     """
@@ -49,8 +48,9 @@ class PathManager:
         errors: Optional[str] = None,
         newline: Optional[str] = None,
     ):
-        if IOPathManager:
-            return IOPathManager.open(
+        if (path.startswith("ml-platform-generic") or
+                 path.startswith("roblox.analytics.users")) and IOPathManager:
+            return IOPathManager._open(
                 path=path,
                 mode=mode,
                 buffering=buffering,
@@ -69,47 +69,80 @@ class PathManager:
 
     @staticmethod
     def copy(src_path: str, dst_path: str, overwrite: bool = False) -> bool:
-        if IOPathManager:
-            return IOPathManager.copy(
+        if (src_path.startswith("ml-platform-generic") or
+                 src_path.startswith("roblox.analytics.users")) and IOPathManager:
+            return IOPathManager._copy(
                 src_path=src_path, dst_path=dst_path, overwrite=overwrite
             )
         return shutil.copyfile(src_path, dst_path)
 
     @staticmethod
+    def symlink(src_path: str, dst_path: str):
+        try:
+            os.symlink(src_path, dst_path)
+        except OSError as e:
+            if e.errno == errno.EEXIST:
+                os.remove(dst_path)
+                os.symlink(src_path, dst_path)
+
+    @staticmethod
     def get_local_path(path: str, **kwargs) -> str:
-        if IOPathManager:
-            return IOPathManager.get_local_path(path, **kwargs)
+        if (path.startswith("ml-platform-generic") or
+                 path.startswith("roblox.analytics.users")) and IOPathManager:
+            try:
+                return IOPathManager._get_local_path(path,  **kwargs)
+            except:
+                raise ValueError(path)
         return path
 
     @staticmethod
     def exists(path: str) -> bool:
-        if IOPathManager:
-            return IOPathManager.exists(path)
+        if "iopath" in path: ## check if exists in cache
+            return os.path.exists(path)
+        if (path.startswith("ml-platform-generic") or
+                 path.startswith("roblox.analytics.users")): ## check if its local saving
+            if IOPathManager:
+                try:
+                    result = IOPathManager._exists(path)
+                except Exception as e:
+                    raise ValueError
+                return result
         return os.path.exists(path)
 
     @staticmethod
     def isfile(path: str) -> bool:
-        if IOPathManager:
-            return IOPathManager.isfile(path)
+        #if IOPathManager:
+        #    return IOPathManager.isfile(path)
         return os.path.isfile(path)
 
     @staticmethod
+    def islink(path: str) -> Optional[bool]:
+        if not PathManager.path_requires_pathmanager(path):
+            return os.path.islink(path)
+        return None
+
+    @staticmethod
     def ls(path: str) -> List[str]:
-        if IOPathManager:
-            return IOPathManager.ls(path)
-        return os.listdir(path)
+        if (path.startswith("ml-platform-generic") or
+                 path.startswith("roblox.analytics.users")) and IOPathManager:
+            return IOPathManager._ls(path)
+        else:
+            return os.listdir(path)
 
     @staticmethod
     def mkdirs(path: str) -> None:
-        if IOPathManager:
-            return IOPathManager.mkdirs(path)
+        if (path.startswith("ml-platform-generic") or
+                 path.startswith("roblox.analytics.users"))  and IOPathManager:
+            return IOPathManager._mkdirs(path)
         os.makedirs(path, exist_ok=True)
 
     @staticmethod
     def rm(path: str) -> None:
-        if IOPathManager:
-            return IOPathManager.rm(path)
+        if (path.startswith("ml-platform-generic") or
+                 path.startswith("roblox.analytics.users"))  and IOPathManager:
+            return IOPathManager._rm(path)
         os.remove(path)
+        assert not os.path.exists(path)
 
     @staticmethod
     def chmod(path: str, mode: int) -> None:
@@ -125,8 +158,9 @@ class PathManager:
     def copy_from_local(
         local_path: str, dst_path: str, overwrite: bool = False, **kwargs
     ) -> None:
-        if IOPathManager:
-            return IOPathManager.copy_from_local(
+        if (local_path.startswith("ml-platform-generic") or
+                 local_path.startswith("roblox.analytics.users"))   and IOPathManager:
+            return IOPathManager._copy_from_local(
                 local_path=local_path, dst_path=dst_path, overwrite=overwrite, **kwargs
             )
         return shutil.copyfile(local_path, dst_path)
@@ -134,7 +168,7 @@ class PathManager:
     @staticmethod
     def path_requires_pathmanager(path: str) -> bool:
         """Do we require PathManager to access given path?"""
-        if IOPathManager:
+        if IOPathManager and not isinstance(IOPathManager, S3PathHandler) :
             for p in IOPathManager._path_handlers.keys():
                 if path.startswith(p):
                     return True
@@ -152,6 +186,7 @@ class PathManager:
     """
     ioPath async PathManager methods:
     """
+
     @staticmethod
     def opena(
         path: str,
@@ -160,6 +195,7 @@ class PathManager:
         encoding: Optional[str] = None,
         errors: Optional[str] = None,
         newline: Optional[str] = None,
+        callback_after_file_close=None,
     ):
         """
         Return file descriptor with asynchronous write operations.
@@ -168,8 +204,9 @@ class PathManager:
         if not IOPathManager:
             logging.info("ioPath is initializing PathManager.")
             try:
-                from iopath.common.file_io import PathManager
-                IOPathManager = PathManager()
+                from iopath.common.s3 import S3PathManager
+
+                IOPathManager = S3PathManager()
             except Exception:
                 logging.exception("Failed to initialize ioPath PathManager object.")
         return IOPathManager.opena(
@@ -179,6 +216,7 @@ class PathManager:
             encoding=encoding,
             errors=errors,
             newline=newline,
+            callback_after_file_close=callback_after_file_close,
         )
 
     @staticmethod
@@ -192,3 +230,36 @@ class PathManager:
         if IOPathManager:
             return IOPathManager.async_close()
         return False
+
+
+def torch_load_cpu(path):
+    state = torch.load(path, map_location=torch.device("cpu"))
+    # If model was trained with fp16, model from loaded state_dict can be moved to fp16
+    if isinstance(state, dict) and "cfg" in state:
+        if (
+            state["cfg"]["common"]["fp16"]
+            or state["cfg"]["common"]["memory_efficient_fp16"]
+        ):
+            state["model"] = {k: v.half() for k, v in state["model"].items()}
+    return state
+
+
+def save_json(content, path, indent=4):
+    with open(path, "w") as f:
+        json.dump(content, f, indent=indent)
+
+
+def load_json(p):
+    return json.load(open(p))
+
+
+def load_jsonl(path):
+    with open(path).read() as jsonl_content:
+        result = [json.loads(jline) for jline in jsonl_content.splitlines()]
+    return result
+
+
+def load_and_pop_last_optimizer_state(pth):
+    st = torch_load_cpu(pth)
+    st.pop("last_optimizer_state", None)
+    return st

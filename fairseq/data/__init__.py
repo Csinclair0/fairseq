@@ -1,6 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 """isort:skip_file"""
 
@@ -21,7 +22,12 @@ from .bucket_pad_length_dataset import BucketPadLengthDataset
 from .colorize_dataset import ColorizeDataset
 from .concat_dataset import ConcatDataset
 from .concat_sentences_dataset import ConcatSentencesDataset
-from .denoising_dataset import DenoisingDataset
+from .denoising_dataset import (
+    DenoisingDataset,
+    DenoisingLangPairDataset,
+    LMLangPairDataset,
+    MixedDenoisingLMLangPairDataset,
+)
 from .id_dataset import IdDataset
 from .indexed_dataset import (
     IndexedCachedDataset,
@@ -60,6 +66,7 @@ from .shorten_dataset import TruncateDataset, RandomCropDataset
 from .multilingual.sampled_multi_dataset import SampledMultiDataset
 from .multilingual.sampled_multi_epoch_dataset import SampledMultiEpochDataset
 from .fasta_dataset import FastaDataset, EncodedFastaDataset
+from .transform_eos_concat_langpair_dataset import TransformEosConcatLangPairDataset
 
 from .iterators import (
     CountingIterator,
@@ -80,6 +87,8 @@ __all__ = [
     "ConcatSentencesDataset",
     "CountingIterator",
     "DenoisingDataset",
+    "DenoisingLangPairDataset",
+    "LMLangPairDataset",
     "Dictionary",
     "EncodedFastaDataset",
     "EpochBatchIterator",
@@ -126,6 +135,7 @@ __all__ = [
     "TokenBlockDataset",
     "TransformEosDataset",
     "TransformEosLangPairDataset",
+    "TransformEosConcatLangPairDataset",
     "TruncateDataset",
     "TruncatedDictionary",
 ]

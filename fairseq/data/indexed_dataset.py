@@ -2,20 +2,29 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-
+import os
 import shutil
 import struct
 from functools import lru_cache
+
 
 import numpy as np
 import torch
 from fairseq.dataclass.constants import DATASET_IMPL_CHOICES
 from fairseq.data.fasta_dataset import FastaDataset
 from fairseq.file_io import PathManager
+from fairseq.data.huffman import HuffmanMMapIndexedDataset, HuffmanMMapIndex
 
 from . import FairseqDataset
 
 from typing import Union
+
+try:
+    use_s3 = os.environ.get("USE_S3_DATALOADER", "0")
+    if use_s3 == "1":
+        from smart_open import open 
+except ImportError:
+    use_s3 = "0" 
 
 
 def best_fitting_int_dtype(
@@ -48,6 +57,8 @@ def infer_dataset_impl(path):
                 return "cached"
             elif magic == MMapIndexedDataset.Index._HDR_MAGIC[:8]:
                 return "mmap"
+            elif magic == HuffmanMMapIndex._HDR_MAGIC[:8]:
+                return "huffman"
             else:
                 return None
     elif FastaDataset.exists(path):
@@ -63,6 +74,10 @@ def make_builder(out_file, impl, vocab_size=None):
         )
     elif impl == "fasta":
         raise NotImplementedError
+    elif impl == "huffman":
+        raise ValueError(
+            "Use HuffmanCodeBuilder directly as it has a different interface."
+        )
     else:
         return IndexedDatasetBuilder(out_file)
 
@@ -83,6 +98,8 @@ def make_dataset(path, impl, fix_lua_indexing=False, dictionary=None):
         from fairseq.data.fasta_dataset import EncodedFastaDataset
 
         return EncodedFastaDataset(path, dictionary)
+    elif impl == "huffman" and HuffmanMMapIndexedDataset.exists(path):
+        return HuffmanMMapIndexedDataset(path)
     return None
 
 
@@ -91,6 +108,8 @@ def dataset_exists(path, impl):
         return IndexedRawTextDataset.exists(path)
     elif impl == "mmap":
         return MMapIndexedDataset.exists(path)
+    elif impl == "huffman":
+        return HuffmanMMapIndexedDataset.exists(path)
     else:
         return IndexedDataset.exists(path)
 
@@ -111,7 +130,7 @@ _code_to_dtype = {
     3: np.int16,
     4: np.int32,
     5: np.int64,
-    6: np.float,
+    6: np.float64,
     7: np.double,
     8: np.uint16,
     9: np.uint32,
@@ -147,6 +166,8 @@ class IndexedDataset(FairseqDataset):
         self.read_index(path)
 
     def read_index(self, path):
+        if use_s3 == "1":
+            path = f"s3://{path}"
         with open(index_file_path(path), "rb") as f:
             magic = f.read(8)
             assert magic == self._HDR_MAGIC, (
@@ -198,6 +219,7 @@ class IndexedDataset(FairseqDataset):
 
     @staticmethod
     def exists(path):
+        if use_s3 == "1": return True ## TODO add s3 file checking logic
         return PathManager.exists(index_file_path(path)) and PathManager.exists(
             data_file_path(path)
         )
@@ -372,7 +394,7 @@ class IndexedDatasetBuilder:
         np.int16: 2,
         np.int32: 4,
         np.int64: 8,
-        np.float: 4,
+        np.float64: 4,
         np.double: 8,
     }
 

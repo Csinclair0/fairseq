@@ -1,6 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
 import logging
@@ -10,6 +11,8 @@ from typing import Optional
 
 import numpy as np
 import torch
+from omegaconf import II
+
 from fairseq import utils
 from fairseq.data import (
     AppendTokenDataset,
@@ -30,8 +33,6 @@ from fairseq.data.indexed_dataset import get_available_dataset_impl
 from fairseq.data.shorten_dataset import maybe_shorten_dataset
 from fairseq.dataclass import ChoiceEnum, FairseqDataclass
 from fairseq.tasks import LegacyFairseqTask, register_task
-from omegaconf import II
-
 
 SAMPLE_BREAK_MODE_CHOICES = ChoiceEnum(["none", "complete", "complete_doc", "eos"])
 SHORTEN_METHOD_CHOICES = ChoiceEnum(["none", "truncate", "random_crop"])
@@ -68,6 +69,9 @@ class LanguageModelingConfig(FairseqDataclass):
     add_bos_token: bool = field(
         default=False, metadata={"help": "prepend beginning of sentence token (<s>)"}
     )
+    max_source_positions: Optional[int] = field(
+        default=None, metadata={"help": "max number of tokens in the source sequence"}
+    )
     max_target_positions: Optional[int] = field(
         default=None, metadata={"help": "max number of tokens in the target sequence"}
     )
@@ -85,10 +89,12 @@ class LanguageModelingConfig(FairseqDataclass):
         },
     )
     pad_to_fixed_length: Optional[bool] = field(
-        default=False, metadata={"help": "pad to fixed length"},
+        default=False,
+        metadata={"help": "pad to fixed length"},
     )
     pad_to_fixed_bsz: Optional[bool] = field(
-        default=False, metadata={"help": "boolean to pad to fixed batch size"},
+        default=False,
+        metadata={"help": "boolean to pad to fixed batch size"},
     )
 
     # TODO common vars below add to parent
@@ -185,12 +191,12 @@ class LanguageModelingTask(LegacyFairseqTask):
 
         return cls(args, dictionary, output_dictionary, targets=targets)
 
-    def build_model(self, args):
-        model = super().build_model(args)
+    def build_model(self, args, from_checkpoint=False):
+        model = super().build_model(args, from_checkpoint)
         for target in self.targets:
             if target not in model.supported_targets:
                 raise ValueError(
-                    "Unsupported language modeling target: {}".format(target)
+                    f"Unsupported language modeling target: {target} not in {model.supported_targets}"
                 )
 
         return model
@@ -247,7 +253,9 @@ class LanguageModelingTask(LegacyFairseqTask):
 
         pad_to_bsz = None
         if self.args.pad_to_fixed_bsz:
-            pad_to_bsz = self.args.batch_size_valid if 'valid' in split else self.args.batch_size
+            pad_to_bsz = (
+                self.args.batch_size_valid if "valid" in split else self.args.batch_size
+            )
 
         self.datasets[split] = MonolingualDataset(
             dataset=dataset,

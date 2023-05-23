@@ -20,6 +20,7 @@ from fairseq.dataclass.configs import (
     GenerationConfig,
     InteractiveConfig,
     OptimizationConfig,
+    EMAConfig,
 )
 from fairseq.dataclass.utils import gen_parser_from_dataclass
 
@@ -40,6 +41,7 @@ def get_training_parser(default_task="translation"):
     add_model_args(parser)
     add_optimization_args(parser)
     add_checkpoint_args(parser)
+    add_ema_args(parser)
     return parser
 
 
@@ -51,6 +53,14 @@ def get_generation_parser(interactive=False, default_task="translation"):
     add_checkpoint_args(parser)
     if interactive:
         add_interactive_args(parser)
+    return parser
+
+
+def get_speech_generation_parser(default_task="text_to_speech"):
+    parser = get_parser("Speech Generation", default_task)
+    add_dataset_args(parser, gen=True)
+    add_distributed_training_args(parser, default_world_size=1)
+    add_speech_generation_args(parser)
     return parser
 
 
@@ -187,8 +197,8 @@ def parse_args_and_arch(
         args.bf16 = True
     args.tpu = getattr(args, "tpu", False)
     args.bf16 = getattr(args, "bf16", False)
-    if args.bf16:
-        args.tpu = True
+    #if args.bf16:
+    #    args.tpu = True
     if args.tpu and args.fp16:
         raise ValueError("Cannot combine --fp16 and --tpu, use --bf16 on TPUs")
 
@@ -197,6 +207,13 @@ def parse_args_and_arch(
         args.no_seed_provided = True
     else:
         args.no_seed_provided = False
+
+    if getattr(args, "update_epoch_batch_itr", None) is None:
+        if hasattr(args, "grouped_shuffling"):
+            args.update_epoch_batch_itr = args.grouped_shuffling
+        else:
+            args.grouped_shuffling = False
+            args.update_epoch_batch_itr = False
 
     # Apply architecture configuration.
     if hasattr(args, "arch") and args.arch in ARCH_CONFIG_REGISTRY:
@@ -217,6 +234,33 @@ def get_parser(desc, default_task="translation"):
     utils.import_user_module(usr_args)
 
     parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument('--use-distillation', action='store_true', help='use the distillation')
+    parser.add_argument('--teacher-ckpt-path', default='', help='the checkpoints path of teacher models')
+    parser.add_argument('--distil-strategy', default='normal', help='set the strategy of the distillation')
+    parser.add_argument('--distil-rate', default=0.5, type=float, help='set the rate of the distillation')
+    parser.add_argument('--teacher-distil-rate', default=0.5, type=float, help='set the rate of the distillation')
+    parser.add_argument('--kl-loss-combine-rate', default=0.5, type=float, help='set the kl loss combine rate')
+    parser.add_argument('--distil-schedule', default="unchange", type=str, help='set the distil schedule')
+    parser.add_argument('--difficult-queue-size', default=20000, type=int, help='set the difficult queue size')
+    parser.add_argument('--teacher-predict-temperature', default=1.0, type=float, help='set the temperature of teacher softmax')
+    parser.add_argument('--teacher-predict-temperature-schedule', default='none', type=str, help='set the schedule temperature of teacher softmax')
+    parser.add_argument('--distil-rate-decrease-start-step', default=-1, type=int, help='set the start update step to let the distil rate decrease')
+    parser.add_argument('--distil-curiosity-rate', default=0.75, type=float, help='set the curiosity rate')
+    parser.add_argument('--predict-change-margin', default=0.23, type=float, help='set the margin of predict')
+    parser.add_argument('--open-noise-teacher', action='store_true', help='open the noise teacher')
+    parser.add_argument('--zero-first-token', action='store_true', help='zero the first token')
+    parser.add_argument('--teacher-strategy', default='', help='zero the first token')
+    parser.add_argument('--distil-weight-strategy', default='', help='set the weight strategy')
+    parser.add_argument('--soft-range', default=1.0, type=float, help='set the sigmoid range')
+    parser.add_argument('--embedding-norm', default='', help='open the embedding norm')
+    parser.add_argument('--embedding-alpha', default=1.0, type=float, help='open the embedding norm')
+    parser.add_argument('--sigmoid-alpha', default=10, type=float, help='set the sigmoid rescale')
+    parser.add_argument('--sigmoid-mid', default=0.5, type=float, help='set mid value of sigmoid ')
+    parser.add_argument('--kd-rescale', default=1.0, type=float,  help='set the kd rescale')
+    parser.add_argument('--decay-num', default=100000, type=float,  help='set decay num')
+    parser.add_argument('--teacher-encoder-layers', default=6, type=int,  help='set teacher encoder layers')
+    parser.add_argument('--teacher-decoder-layers', default=6, type=int,  help='set teacher decoder layers')
+    parser.add_argument('--mix-schedule', default='teacher', type=str,  help='set teacher decoder layers')
     gen_parser_from_dataclass(parser, CommonConfig())
 
     from fairseq.registry import REGISTRIES
@@ -342,6 +386,16 @@ def add_generation_args(parser):
     return group
 
 
+def add_speech_generation_args(parser):
+    group = parser.add_argument_group("Speech Generation")
+    add_common_eval_args(group)  # NOTE: remove_bpe is not needed
+    # fmt: off
+    group.add_argument('--eos_prob_threshold', default=0.5, type=float,
+                       help='terminate when eos probability exceeds this')
+    # fmt: on
+    return group
+
+
 def add_interactive_args(parser):
     group = parser.add_argument_group("Interactive")
     gen_parser_from_dataclass(group, InteractiveConfig())
@@ -379,3 +433,8 @@ def get_args(
         setattr(args, k, v)
 
     return args
+
+
+def add_ema_args(parser):
+    group = parser.add_argument_group("EMA configuration")
+    gen_parser_from_dataclass(group, EMAConfig())

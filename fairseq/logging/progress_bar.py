@@ -1,6 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
 """
@@ -21,7 +22,6 @@ import torch
 
 from .meters import AverageMeter, StopwatchMeter, TimeMeter
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -32,6 +32,9 @@ def progress_bar(
     log_file: Optional[str] = None,
     epoch: Optional[int] = None,
     prefix: Optional[str] = None,
+    aim_repo: Optional[str] = None,
+    aim_run_hash: Optional[str] = None,
+    aim_param_checkpoint_dir: Optional[str] = None,
     tensorboard_logdir: Optional[str] = None,
     default_log_format: str = "tqdm",
     wandb_project: Optional[str] = None,
@@ -58,10 +61,19 @@ def progress_bar(
     else:
         raise ValueError("Unknown log format: {}".format(log_format))
 
+    if aim_repo:
+        bar = AimProgressBarWrapper(
+            bar,
+            aim_repo=aim_repo,
+            aim_run_hash=aim_run_hash,
+            aim_param_checkpoint_dir=aim_param_checkpoint_dir,
+        )
+
     if tensorboard_logdir:
         try:
             # [FB only] custom wrapper for TensorBoard
             import palaas  # noqa
+
             from .fb_tbmf_wrapper import FbTbmfWrapper
 
             bar = FbTbmfWrapper(bar, log_interval)
@@ -114,6 +126,8 @@ def format_stat(stat):
         stat = "{:g}".format(round(stat.sum))
     elif torch.is_tensor(stat):
         stat = stat.tolist()
+    elif isinstance(stat, dict):
+        stat = {k: v.tolist() for k, v in stat.items()}
     return stat
 
 
@@ -177,6 +191,14 @@ def rename_logger(logger, new_name):
     logger.name = old_name
 
 
+def get_precise_epoch(epoch: Optional[int], count: int, iterator_size: int) -> float:
+    return (
+        epoch - 1 + (count + 1) / float(iterator_size)
+        if epoch is not None and iterator_size > 0
+        else None
+    )
+
+
 class JsonProgressBar(BaseProgressBar):
     """Log output in JSON format."""
 
@@ -196,11 +218,7 @@ class JsonProgressBar(BaseProgressBar):
         """Log intermediate stats according to log_interval."""
         step = step or self.i or 0
         if step > 0 and self.log_interval is not None and step % self.log_interval == 0:
-            update = (
-                self.epoch - 1 + (self.i + 1) / float(self.size)
-                if self.epoch is not None
-                else None
-            )
+            update = get_precise_epoch(self.epoch, self.i, self.size)
             stats = self._format_stats(stats, epoch=self.epoch, update=update)
             with rename_logger(logger, tag):
                 logger.info(json.dumps(stats))
@@ -311,6 +329,87 @@ class TqdmProgressBar(BaseProgressBar):
 
 
 try:
+    import functools
+
+    from aim import Repo as AimRepo
+
+    @functools.lru_cache()
+    def get_aim_run(repo, run_hash):
+        from aim import Run
+
+        return Run(run_hash=run_hash, repo=repo)
+
+except ImportError:
+    get_aim_run = None
+    AimRepo = None
+
+
+class AimProgressBarWrapper(BaseProgressBar):
+    """Log to Aim."""
+
+    def __init__(self, wrapped_bar, aim_repo, aim_run_hash, aim_param_checkpoint_dir):
+        self.wrapped_bar = wrapped_bar
+
+        if get_aim_run is None:
+            self.run = None
+            logger.warning("Aim not found, please install with: pip install aim")
+        else:
+            logger.info(f"Storing logs at Aim repo: {aim_repo}")
+
+            if not aim_run_hash:
+                # Find run based on save_dir parameter
+                query = f"run.checkpoint.save_dir == '{aim_param_checkpoint_dir}'"
+                try:
+                    runs_generator = AimRepo(aim_repo).query_runs(query)
+                    run = next(runs_generator.iter_runs())
+                    aim_run_hash = run.run.hash
+                except Exception:
+                    pass
+
+            if aim_run_hash:
+                logger.info(f"Appending to run: {aim_run_hash}")
+
+            self.run = get_aim_run(aim_repo, aim_run_hash)
+
+    def __iter__(self):
+        return iter(self.wrapped_bar)
+
+    def log(self, stats, tag=None, step=None):
+        """Log intermediate stats to Aim."""
+        self._log_to_aim(stats, tag, step)
+        self.wrapped_bar.log(stats, tag=tag, step=step)
+
+    def print(self, stats, tag=None, step=None):
+        """Print end-of-epoch stats."""
+        self._log_to_aim(stats, tag, step)
+        self.wrapped_bar.print(stats, tag=tag, step=step)
+
+    def update_config(self, config):
+        """Log latest configuration."""
+        if self.run is not None:
+            for key in config:
+                self.run.set(key, config[key], strict=False)
+        self.wrapped_bar.update_config(config)
+
+    def _log_to_aim(self, stats, tag=None, step=None):
+        if self.run is None:
+            return
+
+        if step is None:
+            step = stats["num_updates"]
+
+        if "train" in tag:
+            context = {"tag": tag, "subset": "train"}
+        elif "val" in tag:
+            context = {"tag": tag, "subset": "val"}
+        else:
+            context = {"tag": tag}
+
+        for key in stats.keys() - {"num_updates"}:
+            self.run.track(stats[key], name=key, step=step, context=context)
+
+
+try:
     _tensorboard_writers = {}
     from torch.utils.tensorboard import SummaryWriter
 except ImportError:
@@ -349,6 +448,9 @@ class TensorboardProgressBarWrapper(BaseProgressBar):
             _writers[key].add_text("sys.argv", " ".join(sys.argv))
         return _writers[key]
 
+    def __len__(self):
+        return len(self.wrapped_bar)
+
     def __iter__(self):
         return iter(self.wrapped_bar)
 
@@ -380,6 +482,8 @@ class TensorboardProgressBarWrapper(BaseProgressBar):
                 writer.add_scalar(key, stats[key], step)
             elif torch.is_tensor(stats[key]) and stats[key].numel() == 1:
                 writer.add_scalar(key, stats[key].item(), step)
+            elif isinstance(stats[key], dict):
+                writer.add_scalars(key, stats[key], step)
         writer.flush()
 
 
@@ -393,6 +497,9 @@ class WandBProgressBarWrapper(BaseProgressBar):
     """Log to Weights & Biases."""
 
     def __init__(self, wrapped_bar, wandb_project, run_name=None):
+        super().__init__(
+            wrapped_bar, epoch=wrapped_bar.epoch, prefix=wrapped_bar.prefix
+        )
         self.wrapped_bar = wrapped_bar
         if wandb is None:
             logger.warning("wandb not found, pip install wandb")
@@ -402,8 +509,14 @@ class WandBProgressBarWrapper(BaseProgressBar):
         # within one process it still references the same run
         wandb.init(project=wandb_project, reinit=False, name=run_name)
 
+    def __len__(self):
+        return len(self.wrapped_bar)
+
     def __iter__(self):
-        return iter(self.wrapped_bar)
+        self.size = len(self.wrapped_bar)
+        for i, obj in enumerate(self.wrapped_bar, start=self.n):
+            self.i = i
+            yield obj
 
     def log(self, stats, tag=None, step=None):
         """Log intermediate stats to tensorboard."""
@@ -418,7 +531,7 @@ class WandBProgressBarWrapper(BaseProgressBar):
     def update_config(self, config):
         """Log latest configuration."""
         if wandb is not None:
-            wandb.config.update(config)
+            wandb.config.update(config, allow_val_change=True)
         self.wrapped_bar.update_config(config)
 
     def _log_to_wandb(self, stats, tag=None, step=None):
@@ -428,6 +541,9 @@ class WandBProgressBarWrapper(BaseProgressBar):
             step = stats["num_updates"]
 
         prefix = "" if tag is None else tag + "/"
+
+        epoch = get_precise_epoch(self.epoch, self.i, self.size)
+        wandb.log({prefix + "epoch": epoch}, step=step)
 
         for key in stats.keys() - {"num_updates"}:
             if isinstance(stats[key], AverageMeter):

@@ -1,6 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 """
 Base classes for various fairseq models.
@@ -13,6 +14,9 @@ from typing import Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from omegaconf import DictConfig
+from torch import Tensor
+
 from fairseq import utils
 from fairseq.data import Dictionary
 from fairseq.dataclass.utils import (
@@ -20,17 +24,15 @@ from fairseq.dataclass.utils import (
     gen_parser_from_dataclass,
 )
 from fairseq.models import FairseqDecoder, FairseqEncoder
-from omegaconf import DictConfig
-from torch import Tensor
-
 
 logger = logging.getLogger(__name__)
 
 
 def check_type(module, expected_type):
     if hasattr(module, "unwrapped_module"):
-        assert isinstance(module.unwrapped_module, expected_type), \
-            f"{type(module.unwrapped_module)} != {expected_type}"
+        assert isinstance(
+            module.unwrapped_module, expected_type
+        ), f"{type(module.unwrapped_module)} != {expected_type}"
     else:
         assert isinstance(module, expected_type), f"{type(module)} != {expected_type}"
 
@@ -114,7 +116,9 @@ class BaseFairseqModel(nn.Module):
         """
 
         if model_cfg is None and args is not None:
-            logger.warn("using 'args' is deprecated, please update your code to use dataclass config")
+            logger.warn(
+                "using 'args' is deprecated, please update your code to use dataclass config"
+            )
             model_cfg = convert_namespace_to_omegaconf(args).model
 
         self.upgrade_state_dict(state_dict)
@@ -157,7 +161,9 @@ class BaseFairseqModel(nn.Module):
             if hasattr(m, "set_num_updates") and m != self:
                 m.set_num_updates(num_updates)
 
-    def prepare_for_inference_(self, cfg: DictConfig):
+    def prepare_for_inference_(self, cfg: DictConfig, moe_disable_padding=True):
+        from fairseq.modules.moe import MOELayer
+
         """Prepare model for inference."""
         kwargs = {}
         kwargs["beamable_mm_beam_size"] = (
@@ -170,6 +176,9 @@ class BaseFairseqModel(nn.Module):
             kwargs["retain_dropout"] = cfg.generation.retain_dropout
             kwargs["retain_dropout_modules"] = cfg.generation.retain_dropout_modules
         self.make_generation_fast_(**kwargs)
+        for n, m in self.named_modules():
+            if isinstance(m, MOELayer) and moe_disable_padding:
+                m.prepare_for_inference_()
 
     def make_generation_fast_(self, **kwargs):
         """
@@ -236,6 +245,8 @@ class BaseFairseqModel(nn.Module):
         model_name_or_path,
         checkpoint_file="model.pt",
         data_name_or_path=".",
+        moe_disable_padding=True,
+        skip_prepare_for_inference=False,
         **kwargs,
     ):
         """
@@ -269,7 +280,13 @@ class BaseFairseqModel(nn.Module):
             **kwargs,
         )
         logger.info(x["args"])
-        return hub_utils.GeneratorHubInterface(x["args"], x["task"], x["models"])
+        return hub_utils.GeneratorHubInterface(
+            x["args"],
+            x["task"],
+            x["models"],
+            moe_disable_padding=moe_disable_padding,
+            skip_prepare_for_inference=skip_prepare_for_inference,
+        )
 
     @classmethod
     def hub_models(cls):
@@ -454,7 +471,9 @@ class FairseqMultiModel(BaseFairseqModel):
         """
 
         if model_cfg is None and args is not None:
-            logger.warn("using 'args' is deprecated, please update your code to use dataclass config")
+            logger.warn(
+                "using 'args' is deprecated, please update your code to use dataclass config"
+            )
             model_cfg = convert_namespace_to_omegaconf(args).model
 
         self.upgrade_state_dict(state_dict)
