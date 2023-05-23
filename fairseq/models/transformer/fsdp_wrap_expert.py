@@ -20,15 +20,15 @@ def div_by_world_size(world_size, tensor):
 
 def fsdp_wrap_expert(cfg, layer, min_num_params=0):
     # Wrap MoE layer with FSDP using a process group with all replicated ranks
-    process_group = layer.moe_layer.expert_group
-    world_size = dist_utils.get_data_parallel_group().size()
-    pg_size = process_group.size()
-    num_experts = world_size / pg_size
+    #process_group = layer.moe_layer.expert_group
+    #world_size = dist_utils.get_data_parallel_group().size()
+    #pg_size = process_group.size()
+    num_experts = cfg.moe_expert_count
 
-    for i, expert in enumerate(layer.moe_layer.experts):
-        layer.moe_layer.experts[i] = fsdp_wrap(
-            expert, process_group=process_group, min_num_params=0
-        )
+    #for i, expert in enumerate(layer.moe_layer.experts):
+    #    layer.moe_layer.experts[i] = fsdp_wrap(
+    #        expert, process_group=process_group, min_num_params=0
+    #    )
     if cfg.moe_normalize_expert_grad in {
         "sqrt_num_experts",
         "sqrt_world_size",
@@ -40,12 +40,12 @@ def fsdp_wrap_expert(cfg, layer, min_num_params=0):
     else:
         expert_normalization_term = num_experts
 
-    for p in layer.moe_layer.experts.parameters():
+    for p in layer.deepspeed_moe.experts.parameters():
         p.expert = True
         # Scale grads by world_size/pg_size so that grads match the equivalent replicated
         # world size expected within Trainer
         p.register_hook(functools.partial(div_by_world_size, expert_normalization_term))
 
     # Everything else gets wrapped as normal.
-    layer = fsdp_wrap(layer, min_num_params=min_num_params)
+    #layer = fsdp_wrap(layer, min_num_params=min_num_params)
     return layer

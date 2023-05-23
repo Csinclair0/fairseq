@@ -52,6 +52,7 @@ class DeepSpeedTrainer(Trainer):
         logger.info(f"fairseq generated DeepSpeed config: {self.ds_config}")
 
         self._build_optimizer()
+        
 
     def _build_optimizer(self):
         ## get non-moe parameters
@@ -71,7 +72,10 @@ class DeepSpeedTrainer(Trainer):
         #for group in param_groups:
             #group.update(opt_settings)
         
-        optimizer = optim.build_optimizer(self.cfg.optimizer, param_groups, ds = True)
+        if self.cfg.common.amp:
+            optimizer =  optim.AMPOptimizer.build_optimizer(self.cfg, param_groups, ds = True)
+        else:
+            optimizer = optim.build_optimizer(self.cfg.optimizer, param_groups, ds = True)
 
         
         #optimizer.param_groups[:] = list(param_groups) + optimizer.param_groups[1:]
@@ -80,29 +84,31 @@ class DeepSpeedTrainer(Trainer):
         self.device = torch.device("cuda", self.cfg.distributed_training.device_id)
         self.model.to(device=self.device)
         
-        #logger.info("pg2")
+        
+
         #logger.info(optimizer.param_groups)
         
         
+        self.zero_enabled = self.cfg.common.zero > 0
+
         engine, optimizer, _, _ = deepspeed.initialize(
             model=self.model,
-            optimizer=optimizer._optimizer,
+            optimizer=optimizer._optimizer if self.zero_enabled else optimizer,
+            model_parameters = param_groups,  
             config_params=self.ds_config
         )
-    
-
-        self.zero_enabled = engine.zero_optimization_stage() > 0
 
         # We should initialize the learning rate scheduler immediately after
         # building the optimizer, so that the initial learning rate is set.
         self._lr_scheduler = lr_scheduler.build_lr_scheduler(
             self.cfg.lr_scheduler,
-            engine.optimizer,
+            engine.optimizer #if self.cfg.fp16 else _optimizer
         )
-        optimizer.loss_scaler.raise_error_at_min_scale = False
+        #if self.cfg.common.fp16:
+        #    optimizer.loss_scaler.raise_error_at_min_scale = False
         self._lr_scheduler.step_update(0)
-        self._optimizer = optimizer
-        self._wrapped_model = engine
+        self._optimizer = optimizer # if self.cfg.fp16 else _optimizer
+        self._wrapped_model = engine 
         self.device = engine.device
         self._criterion.to(device=self.device)
         torch.distributed.barrier()
@@ -157,7 +163,7 @@ class DeepSpeedTrainer(Trainer):
                 _config = fairseq_value
                 break
         #assert _config == fairseq_value, f"deepspeed config: {full_name} does not align with fairseq value: {fairseq_value}"
-        return _config
+        return fairseq_value
 
     def _populate_ds_config(self, cfg, ds_config):
         # gradient accumulation steps
@@ -165,30 +171,37 @@ class DeepSpeedTrainer(Trainer):
         ds_config["gradient_accumulation_steps"] = self._get_config(ds_config, "gradient_accumulation_steps", self.cfg.optimization.update_freq[0])
 
         # train_micro_batch_size_per_gpu
-        micro_batch_size = self._get_config(ds_config, "train_micro_batch_size_per_gpu", self.cfg.dataset.max_tokens )
+        if self.cfg.dataset.max_tokens is not None:
+            micro_batch_size = self._get_config(ds_config, "train_micro_batch_size_per_gpu", int(self.cfg.dataset.max_tokens) / 20)
+        else:
+            micro_batch_size = self._get_config(ds_config, "train_micro_batch_size_per_gpu", int(self.cfg.dataset.batch_size))
+        
         ds_config["train_micro_batch_size_per_gpu"] = int(micro_batch_size)
 
         # enable fp16
         fp16 = self._get_config(config=ds_config, full_name="fp16:enabled", fairseq_value=self.cfg.common.fp16)
+        self.fp16 = fp16
         if "fp16" not in ds_config:
             ds_config["fp16"] = {}
+            ds_config["fp16"]['loss_scale_window'] = int(cfg.optimization.fp16_scale_window)
+            ds_config["fp16"]['hysteresis'] = int (int(cfg.optimization.fp16_scale_tolerance) * int(cfg.optimization.fp16_scale_window))
+            ds_config["fp16"]['min_loss_scale'] = float(cfg.optimization.fp16_scale_tolerance)
         ds_config["fp16"]["enabled"] = fp16
+        bf16 = self._get_config(config=ds_config, full_name="bf16:enabled", fairseq_value=self.cfg.common.bf16)
 
-        #TODO: patch in fairseq bf16 config
+        if "bf16" not in ds_config:
+            ds_config["bf16"] = {}
+        ds_config["bf16"]["enabled"] = bf16
+        
+        #if "amp" not in ds_config and self.cfg.common.amp:
+        #    ds_config["amp"] = {"enabled": True, "opt_level": "O1"}
+
 
         # gradient_clipping self.cfg.optimization.clip_norm
         ds_config["gradient_clipping"] = self._get_config(ds_config, "gradient_clipping", self.cfg.optimization.clip_norm)
 
         if "zero_optimization" not in ds_config:
-            ds_config["zero_optimization"] = {"stage": 2,
-                                            "allgather_partitions": True,
-                                            "reduce_scatter": True,
-                                            "allgather_bucket_size": 50000000,
-                                            "reduce_bucket_size": 50000000,
-                                            "overlap_comm": True,
-                                            "contiguous_gradients": True,
-                                            "cpu_offload": True
-                                        }
+            ds_config["zero_optimization"] = {}
 
         zero_stage = self._get_config(ds_config, "zero_optimization:stage", cfg.common.zero)
         ds_config["zero_optimization"]["stage"] = zero_stage
@@ -228,26 +241,31 @@ class DeepSpeedTrainer(Trainer):
         logger.info(f"Preparing to load checkpoint {filename}")
         if not os.path.isdir(filename):
             logger.info("No existing checkpoint found {}".format(filename))
-            return None
+            
 
         def load_model(src, dst):
             if torch.distributed.get_rank() == 0:
                 print(self.cfg.model)
             dst.load_state_dict(src, strict=False, model_cfg=self.cfg.model)
 
-        load_path, client_states = self.model.load_checkpoint(load_dir=filename, load_optimizer_states=not reset_optimizer, custom_load_fn=load_model)
+        load_path, client_states = self.model.load_checkpoint(load_dir=filename, load_optimizer_states=not reset_optimizer,  custom_load_fn=load_model)
 
         logger.info(f'[{torch.distributed.get_rank()}] ckpt client states={client_states}')
 
-        assert not utils.has_parameters(self.get_criterion()), "criterion w. params not supported yet"
-        extra_state = client_states["extra_state"]
-
-        if not reset_optimizer and not reset_lr_scheduler:
-            self.lr_scheduler.load_state_dict(client_states["lr_scheduler_state"])
-
-        self.set_num_updates(client_states["num_updates"])
-
-        self.scaler.loss_scale = client_states["loss_scale"]
+        #assert not utils.has_parameters(self.get_criterion()), "criterion w. params not supported yet"
+        try:
+            extra_state = client_states["extra_state"]
+        except Exception as e:
+            logger.info(e)
+            extra_state = None
+        #if reset_optimizer:
+        #    self._optimizer.initialize_optimizer_states()
+        
+        if not reset_lr_scheduler:
+            #self.lr_scheduler.load_state_dict(client_states["lr_scheduler_state"])
+            num_updates = client_states["optimizer_history"][0]["num_updates"]
+            self.set_num_updates(num_updates)
+            #self.scaler.loss_scale = client_states["loss_scale"]
 
         if extra_state is not None:
             itr_state = extra_state["train_iterator"]
@@ -303,9 +321,12 @@ class DeepSpeedTrainer(Trainer):
         for i, sample in enumerate(samples):
             sample, is_dummy_batch = self._prepare_sample(sample)
 
-            self.model.optimizer.override_loss_scale(self.scaler.loss_scale)
+            if self.fp16:
+                self.model.optimizer.override_loss_scale(self.scaler.loss_scale)
 
             try:
+                if self.teacher_model is not None:
+                    self.teacher_model.eval()
                 # forward and backward
                 loss, sample_size_i, logging_output = self.task.train_step(
                     sample=sample,
@@ -314,6 +335,7 @@ class DeepSpeedTrainer(Trainer):
                     optimizer=self.optimizer,
                     update_num=self.get_num_updates(),
                     ignore_grad=is_dummy_batch,
+                    teacher_model=self.teacher_model,
                     **extra_kwargs,
                 )
                 self.train_step_count += 1
@@ -328,7 +350,7 @@ class DeepSpeedTrainer(Trainer):
                         f"gas_boundary={self.model.is_gradient_accumulation_boundary()}, " \
                         f"train_step={self.train_step_count}, " \
                         f"lr={self.get_lr()}, " \
-                        f"loss_scale={self.model.optimizer.loss_scale}, " \
+                       # f"loss_scale={self.model.optimizer.loss_scale}, " \
                         f"loss={loss}")
                 del loss
                 
@@ -394,14 +416,20 @@ class DeepSpeedTrainer(Trainer):
                     self.optimizer, model=self.model, update_num=self.get_num_updates()
                 )
                 # pass overflow flag from ds to fairseq
-                overflow = self.model.optimizer.overflow
-                self.scaler.check_overflow(overflow=overflow)
-                self.scaler.update()
+                if self.fp16:
+                    overflow = self.model.optimizer.overflow
+                    self.scaler.check_overflow(overflow=overflow)
+                    self.scaler.update()
+                else:
+                    overflow = False
         except FloatingPointError:
-            raise
+            logger.info(f"NOTE: minimum scale reached, ignoring any lowering")
+            overflow = True
         except OverflowError as e:
             logger.info(f"NOTE: gradient overflow detected, ignoring gradient, {str(e)}")
             overflow = True
+
+            #self.zero_grad()
     
         logging_output = None
         if not overflow or self.cfg.distributed_training.ddp_backend == "slow_mo":

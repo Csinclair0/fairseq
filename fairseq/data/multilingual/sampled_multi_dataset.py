@@ -195,34 +195,37 @@ class SampledMultiDataset(FairseqDataset):
                     counts[i] += 1
             return counts
 
-        def get_in_dataset_indices(datasets, sizes, sample_ratios):
+        def get_in_dataset_indices(datasets, sample_ratios):
             counts = get_counts(sample_ratios)
+            logger.info("got counts")
             # uniformally sample desired counts for each dataset
             # if the desired counts are large, sample with replacement:
             indices = [
                 self.random_choice_in_dataset(rng, d, c)
                 for c, d in zip(counts, datasets)
             ]
+            logger.info("got indices")
             return indices
 
-        sizes = [len(d) for d in datasets]
+        
         if sample_ratios is None:
+            sizes = [len(d) for d in datasets]
             # default back to concating datasets
             in_dataset_indices = [list(range(s)) for s in sizes]
             virtual_sizes_per_dataset = sizes
+            if virtual_size < sum(sizes):
+                logger.warning(
+                    f"virtual data size ({virtual_size}) is less than real data size ({sum(sizes)})."
+                    " If virtual size << real data size, there could be data coverage issue."
+                )
         else:
             ratios = sample_ratios / sample_ratios.sum()
-            in_dataset_indices = get_in_dataset_indices(datasets, sizes, ratios)
+            in_dataset_indices = get_in_dataset_indices(datasets, ratios)
             virtual_sizes_per_dataset = [len(d) for d in in_dataset_indices]
         virtual_sizes_per_dataset = np.array(virtual_sizes_per_dataset, np.int64)
         cumulative_sizes = np.cumsum(virtual_sizes_per_dataset)
         assert sum(virtual_sizes_per_dataset) == virtual_size
         assert cumulative_sizes[-1] == virtual_size
-        if virtual_size < sum(sizes):
-            logger.warning(
-                f"virtual data size ({virtual_size}) is less than real data size ({sum(sizes)})."
-                " If virtual size << real data size, there could be data coverage issue."
-            )
         in_dataset_indices = np.hstack(in_dataset_indices)
         return in_dataset_indices, cumulative_sizes, virtual_sizes_per_dataset
 
@@ -413,28 +416,31 @@ class SampledMultiDataset(FairseqDataset):
                 self._cur_epoch,  # epoch index,
             ]
         )
+        logger.info("rng")
         self._clean_if_not_none(
             [self.cumulated_sizes, self.virtual_size_per_dataset, self._sizes]
         )
         self._sizes = None
-
+        logger.info("cleaned")
         indices, cumulated_sizes, virtual_size_per_dataset = self.get_virtual_indices(
             rng, self.datasets, self.sample_ratios, self.virtual_size
         )
+        logger.info("got_virtual")
         self._cur_indices = indices
         self.cumulated_sizes = cumulated_sizes
         self.virtual_size_per_dataset = virtual_size_per_dataset
 
-        raw_sizes = [len(d) for d in self.datasets]
+        #raw_sizes = [len(d) for d in self.datasets]
+        logger.info("raw_sizes")
         sampled_sizes = self.virtual_size_per_dataset
-        logger.info(
-            f"[{self.split}] Raw sizes: {str(dict(zip(self.keys, raw_sizes)))}; "
-            f"raw total size: {sum(raw_sizes)}"
-        )
-        logger.info(
-            f"[{self.split}] Resampled sizes: {str(dict(zip(self.keys, sampled_sizes)))}; "
-            f"resampled total size: {sum(sampled_sizes)}"
-        )
+        #logger.info(
+        #    f"[{self.split}] Raw sizes: {str(dict(zip(self.keys, raw_sizes)))}; "
+        #    f"raw total size: {sum(raw_sizes)}"
+        #)
+        #logger.info(
+        #    f"[{self.split}] Resampled sizes: {str(dict(zip(self.keys, sampled_sizes)))}; "
+        #    f"resampled total size: {sum(sampled_sizes)}"
+        #)
         if self.sample_ratios is not None:
             logger.info(
                 f"[{self.split}] Upsampling ratios: {str(dict(zip(self.keys, self.sample_ratios)))}"

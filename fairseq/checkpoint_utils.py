@@ -19,6 +19,7 @@ from collections import OrderedDict
 from glob import glob
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+from torch.serialization import default_restore_location
 
 import numpy as np
 import torch
@@ -218,7 +219,12 @@ def delete_old_checkpoint_files(
                 try:
                     os.remove(old_chk)
                 except IsADirectoryError:
-                    shutil.rmtree(old_chk)
+                    shutil.rmtree(old_chk, ignore_errors=True)
+                except FileNotFoundError:
+                    # With potentially multiple processes removing the same file, the
+                    # file being missing is benign (missing_ok isn't available until
+                    # Python 3.8).
+                    pass
             elif PathManager.exists(old_chk):
                 PathManager.rm(old_chk)
 
@@ -489,6 +495,15 @@ def load_checkpoint_to_cpu(
     state = _upgrade_state_dict(state)
     return state
 
+
+def load_teacher_checkpoint_to_cpu(path):
+    """Loads a checkpoint to CPU (with upgrading for backward compatibility)."""
+    with PathManager.open(path, "rb") as f:
+        state = torch.load(
+            f, map_location=lambda s, l: default_restore_location(s, "cpu")
+        )
+
+    return state 
 
 def load_model_ensemble(
     filenames,

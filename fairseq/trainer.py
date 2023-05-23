@@ -154,6 +154,7 @@ class Trainer(object):
         self._wrapped_criterion = None
         self._wrapped_model = None
         self._ema = None
+        self.teacher_model = None
 
         # TODO(myleott): support tpu
         if self.cuda and self.data_parallel_world_size > 1:
@@ -467,27 +468,27 @@ class Trainer(object):
 
 
     def save_checkpoint(
-        self, filename, extra_state, training_finished=False, async_callback_fn=None
+        self, filename, extra_state, async_callback_fn=None
     ):
         """Save all training state in a checkpoint file."""
         # call state_dict on all ranks in case it needs internal communication
-        state_dicts = self.state_dict(filename, training_finished)
-        for filename, state_dict in state_dicts.items():
+        #state_dicts = self.state_dict(filename)
+        #raise ValueError(state_dicts, filename)
+        if self.should_save_checkpoint_on_current_rank:
+
             logger.info(f"Saving checkpoint to {os.path.abspath(filename)}")
-            state_dict = utils.move_to_cpu(
-                state_dict,
-                # keep params in FP16 when training with --memory-efficient-fp16
-                cast_to_fp32=not self.cfg.common.memory_efficient_fp16,
-            )
+            # call state_dict on all ranks in case it needs internal communication
+            state_dict = utils.move_to_cpu(self.state_dict())
             state_dict["extra_state"].update(extra_state)
-            if self.should_save_checkpoint_on_current_rank:
-                checkpoint_utils.torch_persistent_save(
-                    state_dict,
-                    filename,
-                    async_write=self.cfg.checkpoint.write_checkpoints_asynchronously,
-                    async_callback_fn=async_callback_fn,
-                )
+
+            checkpoint_utils.torch_persistent_save(
+                state_dict,
+                filename,
+                async_write=self.cfg.checkpoint.write_checkpoints_asynchronously,
+            )
             logger.info(f"Finished saving checkpoint to {os.path.abspath(filename)}")
+            return os.path.abspath(filename)
+        return None
 
     def load_checkpoint(
         self,
@@ -506,6 +507,8 @@ class Trainer(object):
         extra_state, self._optim_history, last_optim_state = None, [], None
 
         is_distributed = self.data_parallel_world_size > 1
+        logger.info(f"is distributed {is_distributed} ")
+        logger.info(f"use_sharded_state {self.cfg.distributed_training.use_sharded_state} ")
         bexists = PathManager.isfile(filename)
         if bexists:
             logger.info(f"Preparing to load checkpoint {filename}")
@@ -572,7 +575,6 @@ class Trainer(object):
                     last_optim_state = state.get("last_optimizer_state", None)
 
             # load model parameters
-            try:
                 if (
                     "optimizer_history" in state
                     and len(state["optimizer_history"]) > 0
@@ -609,22 +611,16 @@ class Trainer(object):
                         layer.self_attn._set_skip_embed_dim_check()
                     logger.info(self.model)
 
-                self.model.load_state_dict(
-                    state["model"], strict=True, model_cfg=self.cfg.model
+            self.model.load_state_dict(
+                state["model"], strict=True, model_cfg=self.cfg.model
+            )
+            # save memory for later steps
+            del state["model"]
+            if utils.has_parameters(self.get_criterion()):
+                self.get_criterion().load_state_dict(
+                    state["criterion"], strict=True
                 )
-                # save memory for later steps
-                del state["model"]
-                if utils.has_parameters(self.get_criterion()):
-                    self.get_criterion().load_state_dict(
-                        state["criterion"], strict=True
-                    )
-                    del state["criterion"]
-
-            except Exception:
-                raise Exception(
-                    "Cannot load model parameters from checkpoint {}; "
-                    "please ensure that the architectures match.".format(filename)
-                )
+                del state["criterion"]
             extra_state = state["extra_state"]
             self._optim_history = state["optimizer_history"]
 
@@ -844,7 +840,7 @@ class Trainer(object):
         logging_outputs, sample_size, ooms = [], 0, 0
         for i, sample in enumerate(samples):  # delayed update loop
             sample, is_dummy_batch = self._prepare_sample(sample)
-
+            #logger.info(f" dp_size {self.data_parallel_world_size} , i {i} , len {len(samples)}")
             # MoE training with --batch-size or --max-sentences set
             if (
                 self.is_moe
@@ -892,6 +888,8 @@ class Trainer(object):
                     return contextlib.ExitStack()  # dummy contextmanager
 
             try:
+                if self.teacher_model is not None:
+                    self.teacher_model.eval()
                 with maybe_no_sync():
                     # forward and backward
                     loss, sample_size_i, logging_output = self.task.train_step(
@@ -901,6 +899,7 @@ class Trainer(object):
                         optimizer=self.optimizer,
                         update_num=self.get_num_updates(),
                         ignore_grad=is_dummy_batch,
+                        teacher_model=self.teacher_model, 
                         **extra_kwargs,
                     )
                     del loss

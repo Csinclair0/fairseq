@@ -143,7 +143,7 @@ class TransformerEncoderLayerBase(nn.Module):
         args (argparse.Namespace): parsed command-line arguments
     """
 
-    def __init__(self, cfg, return_fc=False, is_moe_layer=False):
+    def __init__(self, cfg, return_fc=False, is_moe_layer=False, moe_idx=-1):
         super().__init__()
         self.cfg = cfg
         self.return_fc = return_fc
@@ -245,10 +245,10 @@ class TransformerEncoderLayerBase(nn.Module):
                     )
             else:
                 if cfg.expert_list != '':
-                    num_experts = cfg.expert_list.split(',')
+                    num_experts = int(cfg.expert_list.split(',')[moe_idx])
                 else:
                     num_experts = cfg.moe_expert_count
-                fc3 = nn.Linear(self.embed_dim, self.embed_dim)
+                fc3 = FeedForwardNetwork(cfg, self.embed_dim, ffn_dim, self.dropout_module)
                 self.moe_layer = MoE(
                     hidden_size = self.embed_dim,
                     expert = fc3, 
@@ -468,13 +468,14 @@ class TransformerEncoderLayerBase(nn.Module):
 
 # backward compatible with the legacy argparse format
 class TransformerEncoderLayer(TransformerEncoderLayerBase):
-    def __init__(self, args, return_fc=False, is_moe_layer=False):
+    def __init__(self, args, return_fc=False, is_moe_layer=False, moe_idx=-1):
         from fairseq.models.transformer import TransformerConfig
 
         super().__init__(
             TransformerConfig.from_namespace(args),
             return_fc=return_fc,
             is_moe_layer=is_moe_layer,
+            moe_idx=moe_idx
         )
         self.args = args
 
@@ -510,6 +511,7 @@ class TransformerDecoderLayerBase(nn.Module):
         add_bias_kv=False,
         add_zero_attn=False,
         is_moe_layer=False,
+        moe_idx=-1, 
     ):
         super().__init__()
         self.cfg = cfg
@@ -683,18 +685,23 @@ class TransformerDecoderLayerBase(nn.Module):
                     )
             else:
                 if cfg.expert_list != '':
-                    num_experts = cfg.expert_list.split(',')
+                    num_experts = int(cfg.expert_list.split(',')[moe_idx])
                 else:
                     num_experts = cfg.moe_expert_count
-                fc3 = nn.Linear(self.embed_dim, self.embed_dim)
+                fc3 = FeedForwardNetwork(cfg, self.embed_dim, ffn_dim, self.dropout_module)
                 self.moe_layer = MoE(
                     hidden_size = self.embed_dim,
                     expert = fc3, 
-                    num_experts = num_experts, 
+                    num_experts = int(num_experts), 
                     ep_size = cfg.eps_size, 
                     k = 1 if cfg.moe_top1_expert else 2, 
                     use_residual=cfg.use_residual, 
-                    use_tutel = cfg.use_tutel_moe
+                    use_tutel = cfg.use_tutel_moe, 
+                    noisy_gate_policy=cfg.moe_second_expert_policy, 
+                    drop_tokens = cfg.drop_tokens, 
+                    use_rts = cfg.use_rts, 
+                    capacity_factor=cfg.capacity_factor, 
+                    eval_capacity_factor=cfg.eval_capacity_factor
                 )
                 
 
@@ -975,6 +982,7 @@ class TransformerDecoderLayer(TransformerDecoderLayerBase):
         add_bias_kv=False,
         add_zero_attn=False,
         is_moe_layer=False,
+        moe_idx=-1, 
         encoder_embeddings: Optional[torch.Tensor] = None
     ):
         from fairseq.models.transformer import TransformerConfig
@@ -985,6 +993,7 @@ class TransformerDecoderLayer(TransformerDecoderLayerBase):
             add_bias_kv=add_bias_kv,
             add_zero_attn=add_zero_attn,
             is_moe_layer=is_moe_layer,
+            moe_idx=moe_idx
         )
         self.args = args
 

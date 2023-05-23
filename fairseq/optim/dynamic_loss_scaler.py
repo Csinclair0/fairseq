@@ -2,6 +2,9 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class DynamicLossScaler(object):
@@ -45,11 +48,11 @@ class DynamicLossScaler(object):
             # overflow has occured
             prev_scale = self.loss_scale
             iter_since_rescale = self._iter - self._last_rescale_iter
-
             self._last_overflow_iter = self._iter
             self._overflows_since_rescale += 1
             pct_overflow = self._overflows_since_rescale / float(iter_since_rescale)
-            if pct_overflow >= self.tolerance:
+            if pct_overflow >= self.tolerance and iter_since_rescale > 10:
+                logger.info(f"pct overflow {pct_overflow}, tolerance {self.tolerance}, iters since {iter_since_rescale}")
                 self._decrease_loss_scale()
                 self._last_rescale_iter = self._iter
                 self._overflows_since_rescale = 0
