@@ -206,7 +206,7 @@ def do_setup(package_data):
         long_description_content_type="text/markdown",
         setup_requires=[
             "cython",
-            'numpy==1.21.1; python_version<"3.7"',
+            'numpy==1.23.1; python_version<"3.7"',
             'numpy; python_version>="3.7"',
             "setuptools>=18.0",
         ],
