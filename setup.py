@@ -254,6 +254,7 @@ def do_setup(package_data):
                 "pyarrow",
                 "fairscale",
                 "sklearn",
+                "deepspeed==0.8.2"
             ]
         },
         package_data=package_data,
