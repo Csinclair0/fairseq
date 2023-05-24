@@ -216,7 +216,7 @@ def do_setup(package_data):
             'dataclasses; python_version<"3.7"',
             "hydra-core==1.2.0",
             "omegaconf==2.2.2",
-            'numpy==1.21.1; python_version<"3.7"',
+            'numpy==1.23.1; python_version<"3.7"',
             'numpy; python_version>="3.7"',
             "regex",
             "sacrebleu @ git+https://github.com/mjpost/sacrebleu.git@master",
@@ -229,7 +229,7 @@ def do_setup(package_data):
             "boto3",
             "scikit-learn==0.24.1",
             "scipy==1.6.1",
-            "submitit",
+            "submitit"
         ],
         dependency_links=dependency_links,
         packages=find_packages(
