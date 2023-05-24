@@ -9,6 +9,7 @@ import itertools
 import logging
 from sys import prefix
 import time
+import json 
 
 import torch
 from fairseq.data import (
@@ -267,7 +268,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
 
             gen_args = json.loads(self.args.eval_bleu_args)
             self.sequence_generator = self.build_generator(
-                [model], Namespace(**gen_args, from_checkpoint)
+                [model], Namespace(**gen_args)
             )
             
         return model
