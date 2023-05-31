@@ -162,8 +162,8 @@ def save_checkpoint(
                     src, dest, overwrite=True
                 ), f"Failed to copy {src} to {dest}"
 
-        #for cp in checkpoints[1:]:
-        #    copy_or_symlink(src=checkpoints[0], dest=cp)
+        for cp in checkpoints[1:]:
+            copy_or_symlink(src=checkpoints[0], dest=cp)
         #    if (trainer.is_moe or trainer.is_base_moe) and (
         #        trainer.is_data_parallel_master
         #        or (trainer.is_fsdp and trainer.use_sharded_state)
