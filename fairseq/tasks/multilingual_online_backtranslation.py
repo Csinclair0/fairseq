@@ -21,7 +21,8 @@ from fairseq.data import (
     RoundRobinZipDatasets,
     TransformEosLangPairDataset,
     data_utils,
-    encoders
+    encoders,
+    SampledMultiEpochDataset
 )
 from fairseq.tasks import register_task
 
@@ -29,7 +30,7 @@ from fairseq.data.multilingual.multilingual_data_manager import (
     MultilingualDatasetManager,
 )
 
-from fairseq.data.multilingual.sampling_method import SamplingMethod
+from fairseq.data.multilingual.sampling_method import SamplingMethod, temperature_sampling
 from fairseq.tasks.online_backtranslation import PiecewiseLinearFn
 from fairseq.tasks.translation_multi_simple_epoch import TranslationMultiSimpleEpochTask
 from fairseq.utils import FileContentsAction
@@ -79,6 +80,12 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                             help='back-translation weight')
         parser.add_argument('--lambda-dae', default="1.0", type=str, metavar='N',
                             help='denoising auto-encoder weight')
+        parser.add_argument('--lambda-main', default="1.0", type=str, metavar='N',
+                            help='denoising auto-encoder weight')
+        
+
+        parser.add_argument('--mono-temp', default="1.0", type=str, metavar='N',
+                            help='temperature sampling for monolingual data')
 
         # Evaluation args
         parser.add_argument('--generate-one-by-one', action='store_true',
@@ -102,6 +109,8 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                                  'e.g., \'{"beam": 4, "lenpen": 0.6}\'')
         parser.add_argument('--eval-bleu-print-samples', action='store_true',
                             help='print sample generations during validation')
+        parser.add_argument('--use-teacher', action='store_true',
+                            help='use teacher for backtranslation')
   
         
         SamplingMethod.add_arguments(parser)
@@ -119,6 +128,8 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         self.SHOW_SAMPLES_NUMBER = 5
         self.lambda_bt = PiecewiseLinearFn.from_string(args.lambda_bt)
         self.lambda_dae = PiecewiseLinearFn.from_string(args.lambda_dae)
+        self.lambda_main = PiecewiseLinearFn.from_string(args.lambda_main)
+        self.use_teacher = args.use_teacher
 
 
 
@@ -137,7 +148,6 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
     @classmethod
     def setup_task(cls, args, **kwargs):
         """Setup the task (e.g., load dictionaries).
-
         Args:
             args (argparse.Namespace): parsed command-line arguments
         """
@@ -159,36 +169,37 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
     
     def load_dataset(self, split, epoch=1, combine=False, **kwargs) -> FairseqDataset:
         """Load a given dataset split.
-
         Args:
             split (str): name of the split (e.g., train, valid, test)
         """
         data_path = self.data[0]
-        if split == "train":
-            dataset = self.load_train_dataset(data_path)
+        train_subset = getattr(self.args, "train_subset", None)
+        if split == train_subset:
+            dataset = self.load_train_dataset(data_path, train_subset)
+            self.datasets[train_subset] = dataset
         else:
             # valid/test should always be the same.
-            dataset = super().load_dataset("valid")
-
-        self.datasets[split] = dataset
-        return dataset
+            super().load_dataset("valid")
 
 
-    def load_train_dataset(self, data_path: str) -> FairseqDataset:
+    def load_train_dataset(self, data_path: str, train_subset: str) -> FairseqDataset:
         """The training dataset is made of backtranslation dataset and denoising dataset."""
-        super().load_dataset("train")
+        super().load_dataset(train_subset)
         
         data = []
-        data.append((f"all-MAIN", self.datasets["train"]))
+        data.append((f"all-MAIN", self.datasets[train_subset]))
+        bt_data = []
+        denoise_data = [] 
         for lang in self.mono_langs:
             train_path = os.path.join(data_path, lang, "train")
             # TODO: could we do the BT using denoise sample ?
             # this would half the data loading work
-            data.append((f"{lang}-BT", self.load_bt_dataset(train_path, lang)))
-            data.append(
-                (f"{lang}-DENOISE", self.load_denoise_dataset(train_path, lang))
-            )
-        
+            bt_data.append(self.load_bt_dataset(train_path, lang))
+            denoise_data.append(self.load_denoise_dataset(train_path, lang))
+        sizes = [len(d) for d in bt_data]
+        sampling_ratios = temperature_sampling(sizes, float(self.args.mono_temp))
+        data.append(("all-BT", SampledMultiEpochDataset(bt_data, sampling_ratios=sampling_ratios )))
+        data.append(("all-DENOISE", SampledMultiEpochDataset(denoise_data, sampling_ratios=sampling_ratios)))
         return RoundRobinZipDatasets(OrderedDict(data))
     
 
@@ -206,8 +217,9 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         mono_dataset_src = PrependTokenDataset(
             mono_dataset, _lang_token_index(self.dictionary, lang)
         )
+        mono_dataset_tgt = PrependTokenDataset(mono_dataset_src, self.dictionary.eos())
 
-        mono_dataset_bt = self._langpair_dataset(mono_dataset_src, mono_dataset)
+        mono_dataset_bt = self._langpair_dataset(mono_dataset_src, mono_dataset_tgt)
         logger.info(
             f"mono_lang = {lang} "
             f"lang token index = {_lang_token_index(self.dictionary, lang)} "
@@ -280,19 +292,13 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         )
         return model
     
-    def display_samples_once_in_a_while(self, smp, mono_lang, other_lang):
+    def display_samples_once_in_a_while(self, smp):
         self._show_samples_ctr += 1
         if self._show_samples_ctr < self.SHOW_SAMPLES_INTERVAL:
             return
         self._show_samples_ctr = 0
 
         ln = smp["net_input"]["src_tokens"].shape[0]
-
-        logger.info(
-            f"(r:{self.args.distributed_rank}) : "
-            f"{other_lang} ---> {mono_lang} "
-            f"({other_lang} was generated by back-translation.) {ln} samples"
-        )
 
         for i in range(min(ln, self.SHOW_SAMPLES_NUMBER)):
             src_tokens = smp["net_input"]["src_tokens"][i]
@@ -301,12 +307,12 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
             src_str = self.dictionary.string(src_tokens, "sentencepiece")
             tgt_str = self.dictionary.string(tgt_tokens, "sentencepiece")
             logger.info(
-                f"\n{i}\t\t[{other_lang} generated]  {src_str}\n"
-                f"\t\t[{mono_lang} original ]  {tgt_str}\n"
+                f"\n{i}\t\t[ generated ]  {src_str}\n"
+                f"\t\t[ original ]  {tgt_str}\n"
                 f"\t\t[ src tokens]  {src_tokens}\n"
             )
 
-    def backtranslate_sample(self, smp, orig_lang, other_lang) -> None:
+    def backtranslate_sample(self, smp, other_lang, model) -> None:
         """
         * WARNING: smp is modified in place.
         * At the start of this function, `smp` has the same input and target:
@@ -314,7 +320,6 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
           | smp['net_input']['src_tokens'] |  smp['target']        |
           | (from data) __en__ hello world |  __en__ hello world   |
           |--------------------------------------------------------|
-
         * We call generator.generate(smp, bos_token = token("ro")),
         and copy the result as input
         * At the end, `smp` has the translation to other language.
@@ -322,15 +327,14 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
           | smp['net_input']['src_tokens'] |  smp['target']        |
           | (generated) __ro__ salut lume  |  __en__ hello world   |
           |--------------------------------------------------------|
-
         """
+        model.eval()
         lang_token = _lang_token_index(self.dictionary, other_lang)
         net_input = smp["net_input"]
         prefix_tokens = torch.full((net_input['src_tokens'].shape[0], 1), lang_token, dtype=net_input["src_tokens"].dtype, device = net_input["src_tokens"].device )
         generated = self.sequence_generator.generate(
-            models=[], sample=smp, prefix_tokens= prefix_tokens, 
+            models=[model], sample=smp, prefix_tokens= prefix_tokens, 
         )
-
         max_lngth = max([gn[0]["tokens"].size(0) for gn in generated])
         net_input = smp["net_input"]
         n_src_tokens = torch.empty(
@@ -356,19 +360,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         net_input["src_tokens"] = n_src_tokens.to(device)
         net_input["src_lengths"] = n_src_lengths.to(device)
 
-    def generate(self, smp, model):
-        model.eval()
-        orig_lang = (
-            self.dictionary[smp["net_input"]["src_tokens"][0][0]]
-            .replace(" ", "")
-            .replace("_", "")
-        )
-        bos_token = smp["net_input"]["prev_output_tokens"][0][0]
-        with torch.no_grad():
-            generated = self.sequence_generator.generate(
-                models=[model], sample=smp, bos_token=bos_token
-            )
-        return generated
+
     
     def get_other_lang(self, lang):
         # TODO: allow more complex mapping
@@ -385,38 +377,36 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
 
         model.train()
         model.set_num_updates(update_num)
-
         agg_loss, agg_sample_size = 0.0, 0.0
         agg_logging_output: Dict[str, float] = defaultdict(float)
         
-        logger.info(sample)
-        
-        dataset_keys = self.datasets["train"].datasets.keys()
+        train_subset = getattr(self.args, "train_subset", None)
+        dataset_keys = self.datasets[train_subset].datasets.keys()
     
         weights = {
             "BT": self.lambda_bt(update_num),
             "DENOISE": self.lambda_dae(update_num),
-            "MAIN": 1.0 
+            "MAIN": self.lambda_main(update_num) 
         }
         log_keys = {"BT": "bt_", "DENOISE": "dae_", "MAIN" : "main_"}
 
         for dataset_key in dataset_keys:
             smp = sample[dataset_key]
-            mono_lang, task_subtype = dataset_key.split("-")
+            _, task_subtype = dataset_key.split("-")
             if weights[task_subtype] == 0:
                 continue
 
             if task_subtype == "BT":
                 with torch.autograd.profiler.record_function("backtranslation"):
                     model.eval()
-                    other_lang = self.get_other_lang(mono_lang)
-                    self.backtranslate_sample(smp, mono_lang, other_lang)
-                    self.display_samples_once_in_a_while(smp, mono_lang, other_lang)
+                    other_lang = self.get_other_lang("all")
+                    self.backtranslate_sample(smp, other_lang, model if not self.use_teacher else teacher_model)
+                    self.display_samples_once_in_a_while(smp)
                     model.train()
 
             # Like in FairseqTask.train_step
             with torch.autograd.profiler.record_function("forward"):
-                loss, sample_size, logging_output = criterion(model, smp)
+                loss, sample_size, logging_output = criterion(model, smp, teacher_model=teacher_model)
             loss *= weights[task_subtype]
             if ignore_grad:
                 loss *= 0
