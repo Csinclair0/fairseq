@@ -16,10 +16,8 @@ logger = logging.getLogger(__name__)
 
 class RoundRobinZipDatasets(FairseqDataset):
     """Zip multiple :class:`~fairseq.data.FairseqDataset` instances together.
-
     Shorter datasets are repeated in a round-robin fashion to match the length
     of the longest one.
-
     Args:
         datasets (Dict[~fairseq.data.FairseqDataset]): a dictionary of
             :class:`~fairseq.data.FairseqDataset` instances.
@@ -131,7 +129,10 @@ class RoundRobinZipDatasets(FairseqDataset):
             max_positions = {k: max_positions for k in self.datasets.keys()}
         ignored_some = False
         for key, dataset in self.datasets.items():
-            dataset = _deep_until_language_pair(dataset)
+            try:
+                dataset = _deep_until_language_pair(dataset)
+            except:
+                logger.info("couldn't find language air dataset")
             self._ordered_indices[key], ignored = dataset.filter_indices_by_size(
                 self._ordered_indices[key], max_positions[key]
             )
