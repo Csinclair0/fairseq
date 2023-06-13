@@ -34,7 +34,7 @@ try:
     from tutel import moe as tutel_moe
 
     has_tutel = True
-except (ModuleNotFoundError, AssertionError):
+except (ModuleNotFoundError, AssertionError, ImportError):
     # import raises AssertionError without CUDA
     has_tutel = False
 
