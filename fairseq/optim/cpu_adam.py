@@ -35,7 +35,7 @@ def _get_cpu_adam():
 @dataclass
 class FairseqCPUAdamConfig(FairseqDataclass):
     adam_betas: str = field(
-        default="(0.9, 0.999)", metadata={"help": "betas for Adam optimizer"}
+        default="(0.9, 0.98)", metadata={"help": "betas for Adam optimizer"}
     )
     adam_eps: float = field(
         default=1e-8, metadata={"help": "epsilon for Adam optimizer"}

@@ -246,9 +246,12 @@ class DeepSpeedTrainer(Trainer):
         def load_model(src, dst):
             if torch.distributed.get_rank() == 0:
                 print(self.cfg.model)
-            dst.load_state_dict(src, strict=False, model_cfg=self.cfg.model)
+            dst.load_state_dict(src, strict=True, model_cfg=self.cfg.model)
 
-        load_path, client_states = self.model.load_checkpoint(load_dir=filename, load_optimizer_states=not reset_optimizer,  custom_load_fn=load_model)
+        try:
+            return super().load_checkpoint(filename, reset_optimizer, reset_lr_scheduler, optimizer_overrides, reset_meters)
+        except:
+            load_path, client_states = self.model.load_checkpoint(load_dir=filename, load_optimizer_states=not reset_optimizer,  custom_load_fn=load_model)
 
         logger.info(f'[{torch.distributed.get_rank()}] ckpt client states={client_states}')
 
