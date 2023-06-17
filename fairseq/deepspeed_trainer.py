@@ -78,9 +78,7 @@ class DeepSpeedTrainer(Trainer):
             optimizer = optim.build_optimizer(self.cfg.optimizer, param_groups, ds = True)
 
         
-        #optimizer.param_groups[:] = list(param_groups) + optimizer.param_groups[1:]
-       # os.environ['LOCAL_RANK'] = str(self.cfg.distributed_training.device_id)
-       # os.environ['OMPI_COMM_WORLD_LOCAL_RANK'] = str(self.cfg.distributed_training.device_id)
+
         self.device = torch.device("cuda", self.cfg.distributed_training.device_id)
         self.model.to(device=self.device)
         
@@ -246,12 +244,9 @@ class DeepSpeedTrainer(Trainer):
         def load_model(src, dst):
             if torch.distributed.get_rank() == 0:
                 print(self.cfg.model)
-            dst.load_state_dict(src, strict=True, model_cfg=self.cfg.model)
+            dst.load_state_dict(src, strict=False, model_cfg=self.cfg.model)
 
-        try:
-            return super().load_checkpoint(filename, reset_optimizer, reset_lr_scheduler, optimizer_overrides, reset_meters)
-        except:
-            load_path, client_states = self.model.load_checkpoint(load_dir=filename, load_optimizer_states=not reset_optimizer,  custom_load_fn=load_model)
+        load_path, client_states = self.model.load_checkpoint(load_dir=filename, load_optimizer_states=not reset_optimizer,  custom_load_fn=load_model)
 
         logger.info(f'[{torch.distributed.get_rank()}] ckpt client states={client_states}')
 
