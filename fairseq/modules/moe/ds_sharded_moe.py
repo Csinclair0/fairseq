@@ -479,9 +479,9 @@ class TopKGate(Module):
 
     def forward(self,
                 input: torch.Tensor,
+                padding_mask: torch.Tensor,
                 used_token: torch.Tensor = None,
-                use_tutel: bool = False, 
-                padding_mask: torch.Tensor) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
+                use_tutel: bool = False) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
 
         if self.wall_clock_breakdown:
             self.timers('TopKGate').start()
