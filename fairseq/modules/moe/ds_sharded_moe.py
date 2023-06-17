@@ -301,7 +301,7 @@ def top1gating(logits: Tensor,
     return l_aux, combine_weights, dispatch_mask, metadata
 
 
-def top2gating(logits: Tensor, capacity_factor: float, min_capacity: int, noisy_gate_policy: str, drop_tokens: bool) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+def top2gating(logits: Tensor, capacity_factor: float, min_capacity: int, noisy_gate_policy: str, drop_tokens: bool, input_mask: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     """Implements Top2Gating on logits."""
     metadata = {}
     # everything is in fp32 in this function
@@ -329,6 +329,12 @@ def top2gating(logits: Tensor, capacity_factor: float, min_capacity: int, noisy_
     logits_except1 = logits_w_noise.masked_fill(mask1.bool(), float("-inf"))
     indices2_s = torch.argmax(logits_except1, dim=1)
     mask2 = F.one_hot(indices2_s, num_classes=num_experts)
+
+     # Compute locations in capacity buffer
+    if input_mask is not None:
+        mask1 = einsum("s,se->se", input_mask, mask1)
+        mask2 = einsum("s,se->se", input_mask, mask2)
+
 
     # Compute locations in capacity buffer
     locations1 = torch.cumsum(mask1, dim=0) - 1
@@ -474,7 +480,8 @@ class TopKGate(Module):
     def forward(self,
                 input: torch.Tensor,
                 used_token: torch.Tensor = None,
-                use_tutel: bool = False) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
+                use_tutel: bool = False, 
+                padding_mask: torch.Tensor) -> Tuple[Tensor, Tensor, Tensor]:  # type: ignore
 
         if self.wall_clock_breakdown:
             self.timers('TopKGate').start()
@@ -494,7 +501,7 @@ class TopKGate(Module):
 
         else:
             gate_output = top2gating(logits, self.capacity_factor if self.training else self.eval_capacity_factor,
-                                     self.min_capacity, self.noisy_gate_policy, self.drop_tokens if not self.training else True)
+                                     self.min_capacity, self.noisy_gate_policy, self.drop_tokens if not self.training else True, padding_mask= padding_mask)
 
         if self.wall_clock_breakdown:
             self.timers('TopKGate').stop()
