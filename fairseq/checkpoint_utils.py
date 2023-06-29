@@ -162,11 +162,12 @@ def save_checkpoint(
                     src, dest, overwrite=True
                 ), f"Failed to copy {src} to {dest}"
 
-        for cp in checkpoints[1:]:
-            try:
-                copy_or_symlink(src=checkpoints[0], dest=cp)
-            except IsADirectoryError:
-                pass
+        if not cfg.common.deepspeed:
+            for cp in checkpoints[1:]:
+                try:
+                    copy_or_symlink(src=checkpoints[0], dest=cp)
+                except IsADirectoryError:
+                    pass
 
         write_timer.stop()
         logger.info(
