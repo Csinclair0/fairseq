@@ -356,9 +356,10 @@ def distributed_init(cfg: FairseqConfig):
         )
         or getattr(cfg.model, "base_layers", 0) > 0
     ):
-        cfg.checkpoint.checkpoint_suffix = (
-            f"-rank-{cfg.distributed_training.distributed_rank}"
-        )
+        if not cfg.common.deepspeed:
+            cfg.checkpoint.checkpoint_suffix = (
+                f"-rank-{cfg.distributed_training.distributed_rank}"
+            )
 
     return cfg.distributed_training.distributed_rank
 
