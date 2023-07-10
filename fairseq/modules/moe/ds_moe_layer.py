@@ -53,6 +53,11 @@ class MoE(torch.nn.Module):
         self.num_experts = num_experts
         self.num_local_experts = num_experts // self.ep_size
         experts = Experts(expert, self.num_local_experts, self.expert_group_name)
+        ## Assign expert attribute
+        for expert in experts.deepspeed_experts:
+            for name, param in expert.named_parameters():
+                param.expert = True 
+
         self.deepspeed_moe = MOELayer(TopKGate(hidden_size, num_experts, k, capacity_factor, eval_capacity_factor,
                                                min_capacity, noisy_gate_policy, drop_tokens, use_rts),
                                       experts,
