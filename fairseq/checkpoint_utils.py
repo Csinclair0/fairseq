@@ -49,6 +49,7 @@ def save_checkpoint(
     val_loss,
     training_finished=False,
     async_callback_fn=None,
+    deepspeed=False
 ):
     from fairseq import meters
 
@@ -162,7 +163,7 @@ def save_checkpoint(
                     src, dest, overwrite=True
                 ), f"Failed to copy {src} to {dest}"
 
-        if not cfg.common.deepspeed:
+        if deepspeed:
             for cp in checkpoints[1:]:
                 try:
                     copy_or_symlink(src=checkpoints[0], dest=cp)
