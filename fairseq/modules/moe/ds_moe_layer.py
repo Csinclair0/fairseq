@@ -23,7 +23,7 @@ class MoE(torch.nn.Module):
                  use_rts=True,
                  use_tutel: bool = False,
                  enable_expert_tensor_parallelism: bool = False, 
-                 tok_droput: float = 0.0):
+                 tok_dropout: float = 0.0):
         """Initialize an MoE layer.
 
         Arguments:
@@ -66,7 +66,7 @@ class MoE(torch.nn.Module):
                                       self.ep_size,
                                       self.num_local_experts,
                                       use_tutel=use_tutel, 
-                                      tok_dropout=tok_droput)
+                                      tok_dropout=tok_dropout)
         if self.use_residual:
             self.mlp = expert
             # coefficient is used for weighted sum of the output of expert and mlp
