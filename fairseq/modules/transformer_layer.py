@@ -260,7 +260,8 @@ class TransformerEncoderLayerBase(nn.Module):
                     drop_tokens = cfg.drop_tokens, 
                     use_rts = cfg.use_rts, 
                     capacity_factor=cfg.capacity_factor, 
-                    eval_capacity_factor=cfg.eval_capacity_factor
+                    eval_capacity_factor=cfg.eval_capacity_factor, 
+                    tok_dropout=cfg.moe_eom
                 )
 
         self.final_layer_norm = LayerNorm(self.embed_dim, export=cfg.export)
@@ -701,7 +702,8 @@ class TransformerDecoderLayerBase(nn.Module):
                     drop_tokens = cfg.drop_tokens, 
                     use_rts = cfg.use_rts, 
                     capacity_factor=cfg.capacity_factor, 
-                    eval_capacity_factor=cfg.eval_capacity_factor
+                    eval_capacity_factor=cfg.eval_capacity_factor, 
+                    tok_dropout=cfg.moe_eom
                 )
                 
 

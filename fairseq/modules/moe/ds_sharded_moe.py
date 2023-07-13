@@ -527,7 +527,8 @@ class MOELayer(Base):
                  ep_group_name,
                  ep_size,
                  num_local_experts: int,
-                 use_tutel: bool = False) -> None:
+                 use_tutel: bool = False, 
+                 tok_dropout: float = 0.0) -> None:
         super().__init__()
         self.gate = gate
         self.experts = experts
@@ -551,6 +552,8 @@ class MOELayer(Base):
         elif use_tutel and TUTEL_INSTALLED and gate.k != 1:
             logger.warning("To enable Tutel optimization, use top-1 instead of top-2 gate. "
                            "Proceeding without Tutel.")
+            
+        self.tok_dropout = tok_dropout
 
     def _set_ep_group(self, ep_group):
         self.ep_group = ep_group
@@ -611,6 +614,21 @@ class MOELayer(Base):
         if self.wall_clock_breakdown:
             self.timers('salltoall').stop()
             self.time_salltoall = self.timers('salltoall').elapsed(reset=False)
+
+        if self.tok_dropout > 0.0:
+            # TODO: replace w Dropout2d
+            if self.training:
+                # drop out 0.2 of token rembeddings
+                mask = (
+                    torch.empty(
+                        expert_output.shape[:-1], device=expert_output.device
+                    ).uniform_()
+                    > self.tok_dropout
+                )
+                expert_output = mask.unsqueeze(-1) * expert_output
+            else:
+                expert_output = expert_output * (1 - self.tok_dropout)
+
 
         # Re-shape back: gecm -> ecm
         expert_output = expert_output.reshape(self.ep_size * self.num_local_experts, -1, d_model)
