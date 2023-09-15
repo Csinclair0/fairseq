@@ -49,6 +49,7 @@ def save_checkpoint(
     val_loss,
     training_finished=False,
     async_callback_fn=None,
+    deepspeed=False
 ):
     from fairseq import meters
 
@@ -142,7 +143,7 @@ def save_checkpoint(
             if PathManager.islink(shared):
                 PathManager.rm(shared)
 
-        trainer.save_checkpoint(
+        saved_cp = trainer.save_checkpoint(
             checkpoints[0],
             extra_state,
             #training_finished=training_finished,
@@ -162,7 +163,13 @@ def save_checkpoint(
                     src, dest, overwrite=True
                 ), f"Failed to copy {src} to {dest}"
 
-        if not cfg.common.deepspeed:
+        if not deepspeed:
+            for cp in checkpoints[1:]:
+                PathManager.copy(
+                        checkpoints[0], cp, overwrite=True
+                    )
+            
+        else:
             for cp in checkpoints[1:]:
                 try:
                     copy_or_symlink(src=checkpoints[0], dest=cp)
