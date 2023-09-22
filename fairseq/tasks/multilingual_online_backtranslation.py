@@ -147,6 +147,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                             help='print sample generations during validation')
         parser.add_argument('--use-teacher', action='store_true',
                             help='use teacher for backtranslation')
+        parser.add_argument('--eval-langs-sep', action = 'store_true')
         parser.add_argument('--enable-bandit-sampling', action = 'store_true')
   
         
