@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 from argparse import Namespace
 import numpy as np
+import math
+import random
 import math 
 
 from typing import Dict, Sequence, Tuple
@@ -34,7 +36,7 @@ from fairseq.data.multilingual.sampling_method import SamplingMethod, temperatur
 from fairseq.tasks.online_backtranslation import PiecewiseLinearFn
 from fairseq.tasks.translation_multi_simple_epoch import TranslationMultiSimpleEpochTask
 from fairseq.utils import FileContentsAction
-
+DATASET_TYPES = ["BT", "DENOISE", "MAIN"]
 logger = logging.getLogger(__name__)
 
 def _lang_token(lang: str) -> str:
@@ -43,6 +45,40 @@ def _lang_token(lang: str) -> str:
 
 def _lang_token_index(dictionary, lang: str) -> int:
     return dictionary.index(_lang_token(lang))
+
+def def_value():
+    return 0
+
+def draw(weights):
+    choice = random.uniform(0, sum(weights))
+    choiceIndex = 0
+
+    for weight in weights:
+        choice -= weight
+        if choice <= 0:
+            return DATASET_TYPES[choiceIndex]
+        choiceIndex += 1
+
+
+def distr(weights_dict, gamma=0.0):
+    weights = weights_dict.values()
+    theSum = float(sum(weights))
+    new_weights = tuple((1.0 - gamma) * (w / theSum) + (gamma / len(weights)) for w in weights)
+    weights = {x[0]: x[1] for x in zip(DATASET_TYPES, new_weights)}
+    return weights
+
+
+
+def mean(aList):
+   theSum = 0
+   count = 0
+
+   for x in aList:
+      theSum += x
+      count += 1
+
+   return 0 if count == 0 else theSum / count
+
 
 @register_task("online_multilingual_backtranslation")
 class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
@@ -111,6 +147,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                             help='print sample generations during validation')
         parser.add_argument('--use-teacher', action='store_true',
                             help='use teacher for backtranslation')
+        parser.add_argument('--enable-bandit-sampling', action = 'store_true')
   
         
         SamplingMethod.add_arguments(parser)
@@ -126,9 +163,14 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         # Start by showing samples
         self._show_samples_ctr = self.SHOW_SAMPLES_INTERVAL
         self.SHOW_SAMPLES_NUMBER = 5
-        self.lambda_bt = PiecewiseLinearFn.from_string(args.lambda_bt)
-        self.lambda_dae = PiecewiseLinearFn.from_string(args.lambda_dae)
-        self.lambda_main = PiecewiseLinearFn.from_string(args.lambda_main)
+        if not self.args.enable_bandit_sampling:
+            self.lambda_bt = PiecewiseLinearFn.from_string(args.lambda_bt)
+            self.lambda_dae = PiecewiseLinearFn.from_string(args.lambda_dae)
+            self.lambda_main = PiecewiseLinearFn.from_string(args.lambda_main)
+        else: 
+            self.sampling_weights = {"BT": 1.0, "DENOISE": 1.0, "MAIN" : 1.0}
+            self.prev_score = 0
+            self.gamma = 0.5
         self.use_teacher = args.use_teacher
 
 
@@ -382,12 +424,17 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         
         train_subset = getattr(self.args, "train_subset", None)
         dataset_keys = self.datasets[train_subset].datasets.keys()
-    
-        weights = {
-            "BT": self.lambda_bt(update_num),
-            "DENOISE": self.lambda_dae(update_num),
-            "MAIN": self.lambda_main(update_num) 
-        }
+        if not self.args.enable_bandit_sampling:
+            weights = {
+                "BT": self.lambda_bt(update_num),
+                "DENOISE": self.lambda_dae(update_num),
+                "MAIN": self.lambda_main(update_num) 
+            }
+        else:
+            self.sampling_weights = distr(self.sampling_weights)
+            weights = defaultdict(def_value)
+            weights[draw(self.sampling_weights)] = 1
+
         log_keys = {"BT": "bt_", "DENOISE": "dae_", "MAIN" : "main_"}
 
         for dataset_key in dataset_keys:
@@ -461,3 +508,15 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                 "dae_ppl",
                 lambda meters: utils.get_perplexity(meters["dae_nll_loss"].avg),
             )
+
+    def valid_step(self, sample, model, criterion, choice):
+        loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
+        reward = logging_output["bleu"] - self.prev_reward
+        self.prev_reward = logging_output["bleu"]
+        self.sampling_weights[choice] *= math.exp(reward * self.gamma / 3)
+        logging_output[f"reward_{choice}"] = reward 
+        logging_output[f"total_steps_{choice}"] += 1
+
+        return loss, sample_size, logging_output
+
+        

@@ -85,6 +85,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         parser.add_argument('--eval-bleu-detok', default = 'space')
         parser.add_argument('--eval-bleu-args', default = '{}')
         parser.add_argument('--eval-langs-sep', action = 'store_true')
+        parser.add_argument('--enable-bandit-sampling', action = 'store_true')
 
         SamplingMethod.add_arguments(parser)
         MultilingualDatasetManager.add_args(parser)
