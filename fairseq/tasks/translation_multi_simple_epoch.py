@@ -270,7 +270,6 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
         if self.args.eval_bleu:
-            EVAL_BLEU_ORDER = 4
             bleu = self._inference_with_bleu(self.sequence_generator, sample, model)
             logging_output["_bleu_sys_len"] = bleu.sys_len
             logging_output["_bleu_ref_len"] = bleu.ref_len
@@ -337,6 +336,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                 totals.append(sum_logs("_bleu_totals_" + str(i)))
             
 
+
             if max(totals) > 0:
                 # log counts as numpy arrays -- log_scalar will sum them correctly
                 metrics.log_scalar("_bleu_counts", np.array(counts))
@@ -372,6 +372,10 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     return round(bleu.score, 2)
 
                 metrics.log_derived("bleu", compute_bleu)
+                
+
+                
+            
 
     def max_positions(self):
         """Return the max sentence length allowed by the task."""
