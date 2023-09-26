@@ -7,7 +7,7 @@ import numpy as np
 import math
 import random
 import math 
-
+from sacrebleu.metrics import BLEU
 from typing import Dict, Sequence, Tuple
 from collections import OrderedDict, defaultdict
 
@@ -27,7 +27,7 @@ from fairseq.data import (
     SampledMultiEpochDataset
 )
 from fairseq.tasks import register_task
-
+from fairseq.metrics import get_active_aggregators
 from fairseq.data.multilingual.multilingual_data_manager import (
     MultilingualDatasetManager,
 )
@@ -38,7 +38,7 @@ from fairseq.tasks.translation_multi_simple_epoch import TranslationMultiSimpleE
 from fairseq.utils import FileContentsAction
 DATASET_TYPES = ["BT", "DENOISE", "MAIN"]
 logger = logging.getLogger(__name__)
-
+EVAL_BLEU_ORDER = 4
 def _lang_token(lang: str) -> str:
     return f"__{lang}__"
 
@@ -69,15 +69,6 @@ def distr(weights_dict, gamma=0.0):
 
 
 
-def mean(aList):
-   theSum = 0
-   count = 0
-
-   for x in aList:
-      theSum += x
-      count += 1
-
-   return 0 if count == 0 else theSum / count
 
 
 @register_task("online_multilingual_backtranslation")
@@ -149,6 +140,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                             help='use teacher for backtranslation')
         parser.add_argument('--eval-langs-sep', action = 'store_true')
         parser.add_argument('--enable-bandit-sampling', action = 'store_true')
+        parser.add_argument('--min-steps-before-sampling', type=int, default = 100)
   
         
         SamplingMethod.add_arguments(parser)
@@ -169,9 +161,13 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
             self.lambda_dae = PiecewiseLinearFn.from_string(args.lambda_dae)
             self.lambda_main = PiecewiseLinearFn.from_string(args.lambda_main)
         else: 
-            self.sampling_weights = {"BT": 1.0, "DENOISE": 1.0, "MAIN" : 1.0}
-            self.prev_score = 0
+            #self.sampling_weights = {"BT": 1.0, "DENOISE": 1.0, "MAIN" : 1.0}
+            self.weights = {"BT": 1.0, "DENOISE": 1.0, "MAIN" : 1.0}
+            self.prev_reward = 0
             self.gamma = 0.5
+            self.reward = 0
+            self.total_steps_choice = {"BT": 0, "DENOISE": 0, "MAIN" : 0}
+            self.choice = "MAIN"
         self.use_teacher = args.use_teacher
 
 
@@ -222,7 +218,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
             self.datasets[train_subset] = dataset
         else:
             # valid/test should always be the same.
-            super().load_dataset("valid")
+            super().load_dataset(getattr(self.args, "valid_subset", None))
 
 
     def load_train_dataset(self, data_path: str, train_subset: str) -> FairseqDataset:
@@ -414,6 +410,26 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         return self.mono_langs[np.random.randint(1, len(self.mono_langs))]
     
 
+    def pick_new_dataset(self, num_updates):
+        if num_updates >= self.args.min_steps_before_sampling and self.args.enable_bandit_sampling:
+            bleu = metrics.get_smoothed_value("valid", 'bleu')
+            logger.info(f"bleu {bleu}")
+            if sum(self.total_steps_choice.values()) < 1:
+                reward = 0
+                self.prev_reward = bleu
+            else:
+                reward = bleu - self.prev_reward
+                logger.info(f" previous bleu score {self.prev_reward}, current {bleu}, reward {reward}")
+                self.prev_reward = bleu
+            reward = 1.0 * reward / self.weights[self.choice]
+            self.reward = reward
+            self.weights[self.choice] *= math.exp(reward * self.gamma / 3)
+            sampling_weights = distr(self.weights)
+            self.choice = draw(sampling_weights.values())
+            self.total_steps_choice[self.choice] += 1 
+            logger.info(f"drawing from {sampling_weights} ... {self.choice}")
+            logger.info(f" total draws {self.total_steps_choice}")
+        
     def train_step(
         self, sample, model, criterion, optimizer, update_num, ignore_grad=False, teacher_model=None
     ):
@@ -432,12 +448,10 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                 "MAIN": self.lambda_main(update_num) 
             }
         else:
-            self.sampling_weights = distr(self.sampling_weights)
             weights = defaultdict(def_value)
-            weights[draw(self.sampling_weights)] = 1
-
+            weights[self.choice] = 1.0
+            
         log_keys = {"BT": "bt_", "DENOISE": "dae_", "MAIN" : "main_"}
-
         for dataset_key in dataset_keys:
             smp = sample[dataset_key]
             _, task_subtype = dataset_key.split("-")
@@ -481,6 +495,11 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
 
     def reduce_metrics(self, logging_outputs, criterion):
         super().reduce_metrics(logging_outputs, criterion)
+        if self.args.enable_bandit_sampling:
+            for choice in ["BT", "MAIN", "DENOISE"]:
+                metrics.log_scalar(f"reward_{choice}", self.weights[choice] , round = 3)
+                metrics.log_scalar(f"total_steps_{choice}", self.total_steps_choice[choice])
+
         bt_sample_size = sum(x.get("bt_sample_size", 0) for x in logging_outputs)
         if bt_sample_size:
             bt_loss_sum = sum(x.get("bt_loss", 0) for x in logging_outputs)
@@ -510,14 +529,4 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                 lambda meters: utils.get_perplexity(meters["dae_nll_loss"].avg),
             )
 
-    def valid_step(self, sample, model, criterion, choice):
-        loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
-        reward = logging_output["bleu"] - self.prev_reward
-        self.prev_reward = logging_output["bleu"]
-        self.sampling_weights[choice] *= math.exp(reward * self.gamma / 3)
-        logging_output[f"reward_{choice}"] = reward 
-        logging_output[f"total_steps_{choice}"] += 1
 
-        return loss, sample_size, logging_output
-
-        
