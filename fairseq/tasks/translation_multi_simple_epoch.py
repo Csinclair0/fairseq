@@ -31,6 +31,9 @@ from fairseq.data.multilingual.sampling_method import SamplingMethod
 from fairseq.tasks import LegacyFairseqTask, register_task
 from fairseq.utils import FileContentsAction
 
+
+logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
+
 EVAL_BLEU_ORDER = 4
 
 ###
@@ -86,6 +89,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         parser.add_argument('--eval-bleu-args', default = '{}')
         parser.add_argument('--eval-langs-sep', action = 'store_true')
         parser.add_argument('--enable-bandit-sampling', action = 'store_true')
+        parser.add_argument('--score-comet-model', type=str, default=None)
 
         SamplingMethod.add_arguments(parser)
         MultilingualDatasetManager.add_args(parser)
@@ -120,6 +124,12 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
         )
         self.lang_idx = self.get_lang_idx()
         self.one_dataset_per_batch = getattr(args, "one_dataset_per_batch", False)
+        if getattr(args, "score_comet_model", None) is not None:
+            from comet import load_from_checkpoint
+            self.comet_model = load_from_checkpoint(getattr(args, "score_comet_model", None))
+        else:
+            self.comet_model = None
+            
         
 
 
@@ -270,7 +280,9 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
         if self.args.eval_bleu:
-            bleu = self._inference_with_bleu(self.sequence_generator, sample, model)
+            bleu , comet = self._inference_with_bleu(self.sequence_generator, sample, model)
+            if comet is not None:
+                logging_output['comet'] = comet
             logging_output["_bleu_sys_len"] = bleu.sys_len
             logging_output["_bleu_ref_len"] = bleu.ref_len
             # we split counts into separate entries so that they can be
@@ -372,6 +384,9 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                     return round(bleu.score, 2)
 
                 metrics.log_derived("bleu", compute_bleu)
+                if self.comet_model is not None:
+                    nsentences = sum(log.get("nsentences", 0) for log in logging_outputs)
+                    metrics.log_scalar("comet", sum_logs("comet") / nsentences)
                 
 
                 
@@ -593,8 +608,9 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
             return s
 
         gen_out = self.inference_step(generator, [model], sample, prefix_tokens=None)
-        hyps, refs = [], []
+        src, hyps, refs = [], [] , []
         for i in range(len(gen_out)):
+            src.append(decode(sample["net_input"]["src_tokens"][i][1:]))
             hyps.append(decode(gen_out[i][0]["tokens"][1:]))
             refs.append(
                 decode(
@@ -603,6 +619,13 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                 )
             )
         if self.args.eval_bleu_print_samples:
+            logger.info("example source: " + src[0])
             logger.info("example hypothesis: " + hyps[0])
             logger.info("example reference: " + refs[0])
-        return sacrebleu.corpus_bleu(hyps, [refs])
+            
+        scores = None
+        if self.comet_model is not None:
+            data = [{"src" : x[0], "mt" :x[1], "ref": x[2]} for x in zip(src, hyps, refs)]
+            scores = self.comet_model.predict(data, batch_size=8, gpus=1, progress_bar=False).scores
+            torch.cuda.empty_cache()
+        return sacrebleu.corpus_bleu(hyps, [refs]) , sum(scores) 

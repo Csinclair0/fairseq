@@ -67,9 +67,33 @@ def distr(weights_dict, gamma=0.0):
     weights = {x[0]: x[1] for x in zip(DATASET_TYPES, new_weights)}
     return weights
 
+def value_dict():
+    return {'langs' : [], 'prop': []}
+
+
+def load_sampling_weights(from_file):
+    with open(from_file) as f:
+        weights = json.load(f)
+        
+    tgt_samples = defaultdict(def_value)
+    src_samples = defaultdict(value_dict)
+    for k, v in weights.items():
+        src_tgt = k.split(':')[-1]
+        src = src_tgt.split('-')[0]
+        tgt = src_tgt.split('-')[1]
+        tgt_samples[tgt] = tgt_samples[tgt] + v 
+        src_samples[tgt]['langs'].append(src)
+        src_samples[tgt]['prop'].append(v)
+        
+    final_src_samples = {}
+    for k, v in src_samples.items():
+        final_src_samples[k] = {'langs' : [ x for x in v['langs']], 'prop' : [x / sum(v['prop']) for x in v['prop']]}
+    
+    return tgt_samples, final_src_samples
 
 
 
+    
 
 @register_task("online_multilingual_backtranslation")
 class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
@@ -108,7 +132,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         parser.add_argument('--lambda-dae', default="1.0", type=str, metavar='N',
                             help='denoising auto-encoder weight')
         parser.add_argument('--lambda-main', default="1.0", type=str, metavar='N',
-                            help='denoising auto-encoder weight')
+                            help='main supervised fine tuning weight')
         
 
         parser.add_argument('--mono-temp', default="1.0", type=str, metavar='N',
@@ -139,8 +163,18 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         parser.add_argument('--use-teacher', action='store_true',
                             help='use teacher for backtranslation')
         parser.add_argument('--eval-langs-sep', action = 'store_true')
+        parser.add_argument('--score-comet-model', type=str, default=None)
+        
+        
+        
+        ## Bandit args
         parser.add_argument('--enable-bandit-sampling', action = 'store_true')
         parser.add_argument('--min-steps-before-sampling', type=int, default = 100)
+        parser.add_argument('--bandit-gamma', type = float, default = 0.5)
+        parser.add_argument('--bandit-scalar', type = float, default = 1.0)
+        parser.add_argument('--mono-temp-file', type = str, default = None )
+        
+        
   
         
         SamplingMethod.add_arguments(parser)
@@ -150,6 +184,8 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
     def __init__(self, args, langs, dicts, training):
         super().__init__(args, langs, dicts, training)
         self.mono_langs = args.mono_langs.split(",")
+        self.mono_temp_file = args.mono_temp_file 
+        
 
 
         self.SHOW_SAMPLES_INTERVAL = 1000
@@ -162,9 +198,10 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
             self.lambda_main = PiecewiseLinearFn.from_string(args.lambda_main)
         else: 
             #self.sampling_weights = {"BT": 1.0, "DENOISE": 1.0, "MAIN" : 1.0}
-            self.weights = {"BT": 1.0, "DENOISE": 1.0, "MAIN" : 1.0}
+            self.weights = {"BT": 1.0, "DENOISE": 0.0, "MAIN" : 1.0}
             self.prev_reward = 0
-            self.gamma = 0.5
+            self.gamma = self.args.bandit_gamma
+            self.bandit_scalar = self.args.bandit_scalar
             self.reward = 0
             self.total_steps_choice = {"BT": 0, "DENOISE": 0, "MAIN" : 0}
             self.choice = "MAIN"
@@ -183,6 +220,8 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
                 logger.warning(f"Expanded data directory {old_data} to {self.data}")
 
         self.dictionary = self.dicts["en"]
+        
+
 
     @classmethod
     def setup_task(cls, args, **kwargs):
@@ -236,7 +275,12 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
             bt_data.append(self.load_bt_dataset(train_path, lang))
             denoise_data.append(self.load_denoise_dataset(train_path, lang))
         sizes = [len(d) for d in bt_data]
-        sampling_ratios = temperature_sampling(sizes, float(self.args.mono_temp))
+        if self.mono_temp_file is None:
+            sampling_ratios = temperature_sampling(sizes, float(self.args.mono_temp))
+        else:
+            tgt_sampling_ratios, src_sampling_ratios = load_sampling_weights(self.mono_temp_file)
+            self.src_sampling_ratios = src_sampling_ratios
+            sampling_ratios = [tgt_sampling_ratios.get(x) for x in self.mono_langs]
         data.append(("all-BT", SampledMultiEpochDataset(bt_data, sampling_ratios=sampling_ratios )))
         data.append(("all-DENOISE", SampledMultiEpochDataset(denoise_data, sampling_ratios=sampling_ratios)))
         return RoundRobinZipDatasets(OrderedDict(data))
@@ -370,7 +414,18 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
         model.eval()
         lang_token = _lang_token_index(self.dictionary, other_lang)
         net_input = smp["net_input"]
-        prefix_tokens = torch.full((net_input['src_tokens'].shape[0], 1), lang_token, dtype=net_input["src_tokens"].dtype, device = net_input["src_tokens"].device )
+        if self.mono_temp_file is not None:
+            tgt_langs = [self.dictionary.__getitem__(x).replace('__', '') for x in smp['target'][:, 1].tolist()]
+            src_langs = []
+            for tgt in tgt_langs:
+                langs = self.src_sampling_ratios[tgt]['langs']
+                probs =  self.src_sampling_ratios[tgt]['prop']
+                src_langs.append(_lang_token_index(self.dictionary, np.random.choice(langs,p =  probs)))
+
+            prefix_tokens = torch.tensor(src_langs,  dtype=net_input["src_tokens"].dtype, device = net_input["src_tokens"].device).reshape((net_input['src_tokens'].shape[0], 1))
+        else:
+            prefix_tokens = torch.full((net_input['src_tokens'].shape[0], 1), lang_token, dtype=net_input["src_tokens"].dtype, device = net_input["src_tokens"].device )
+        src_tokens = net_input['src_tokens'].shape[0]
         generated = self.sequence_generator.generate(
             models=[model], sample=smp, prefix_tokens= prefix_tokens, 
         )
@@ -407,25 +462,32 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
             return self.mono_langs[0]
         if len(self.mono_langs) == 2:
             return self.mono_langs[1]
+        #if self.mono_temp_file is None:
         return self.mono_langs[np.random.randint(1, len(self.mono_langs))]
+        #else:
+        #    src_langs_dict = self.src_sampling_ratios
+        #    return np.random.choice(src_langs_dict['langs'], p = src_langs_dict['prop'])
     
 
-    def pick_new_dataset(self, num_updates):
+    def pick_new_dataset(self, num_updates, valid_loss, maximize = True):
         if num_updates >= self.args.min_steps_before_sampling and self.args.enable_bandit_sampling:
-            bleu = metrics.get_smoothed_value("valid", 'bleu')
-            logger.info(f"bleu {bleu}")
             if sum(self.total_steps_choice.values()) < 1:
                 reward = 0
-                self.prev_reward = bleu
+                self.prev_reward = valid_loss
             else:
-                reward = bleu - self.prev_reward
-                logger.info(f" previous bleu score {self.prev_reward}, current {bleu}, reward {reward}")
-                self.prev_reward = bleu
+                reward = (valid_loss - self.prev_reward) * self.bandit_scalar
+                if not maximize:
+                    reward = -1 * reward
+                logger.info(f" previous bleu score {self.prev_reward}, current {valid_loss}, reward {reward}")
+                logger.info(f"current reward weight {self.weights}")
+                self.prev_reward = valid_loss
             reward = 1.0 * reward / self.weights[self.choice]
-            self.reward = reward
             self.weights[self.choice] *= math.exp(reward * self.gamma / 3)
             sampling_weights = distr(self.weights)
-            self.choice = draw(sampling_weights.values())
+            choice = draw(sampling_weights.values())
+            while choice != 'DENOISE':
+                choice = draw(sampling_weights.values())
+            self.choice = choice
             self.total_steps_choice[self.choice] += 1 
             logger.info(f"drawing from {sampling_weights} ... {self.choice}")
             logger.info(f" total draws {self.total_steps_choice}")
@@ -458,6 +520,7 @@ class MultilingualOnlineBackTranslationTask(TranslationMultiSimpleEpochTask):
             if weights[task_subtype] == 0:
                 continue
 
+            
             if task_subtype == "BT":
                 with torch.autograd.profiler.record_function("backtranslation"):
                     model.eval()
