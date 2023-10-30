@@ -182,10 +182,13 @@ class DeepSpeedTrainer(Trainer):
         fp16 = self._get_config(config=ds_config, full_name="fp16:enabled", fairseq_value=self.cfg.common.fp16)
         self.fp16 = fp16
         if "fp16" not in ds_config:
-            ds_config["fp16"] = {}
-            ds_config["fp16"]['loss_scale_window'] = int(cfg.optimization.fp16_scale_window)
-            ds_config["fp16"]['hysteresis'] = int (int(cfg.optimization.fp16_scale_tolerance) * int(cfg.optimization.fp16_scale_window))
-            ds_config["fp16"]['min_loss_scale'] = float(cfg.optimization.fp16_scale_tolerance)
+            try:
+                ds_config["fp16"] = {}
+                ds_config["fp16"]['loss_scale_window'] = int(cfg.optimization.fp16_scale_window)
+                ds_config["fp16"]['hysteresis'] = int (int(cfg.optimization.fp16_scale_tolerance) * int(cfg.optimization.fp16_scale_window))
+                ds_config["fp16"]['min_loss_scale'] = float(cfg.optimization.fp16_scale_tolerance)
+            except:
+                ds_config["fp16"] = {}
         ds_config["fp16"]["enabled"] = fp16
         bf16 = self._get_config(config=ds_config, full_name="bf16:enabled", fairseq_value=self.cfg.common.bf16)
 
