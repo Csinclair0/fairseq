@@ -224,8 +224,6 @@ def do_setup(package_data):
             "bitarray",
             "torchaudio>=0.8.0",
             "boto3",
-            "scikit-learn==0.24.1",
-            "scipy==1.6.1",
             "submitit"
         ],
         dependency_links=dependency_links,
