@@ -178,13 +178,8 @@ def main(cfg: FairseqConfig) -> None:
 
         # train for one epoch
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
-        try:
-            max_bleu = max(max(valid_losses), max_bleu)
-        except:
-            max_bleu = max_bleu
         if should_stop:
             break
-
         # only use first validation loss to update the learning rate
         lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
 
@@ -195,29 +190,7 @@ def main(cfg: FairseqConfig) -> None:
             # don't cache epoch iterators for sharded datasets
             disable_iterator_cache=task.has_sharded_data("train"),
         )
-    with metrics.aggregate(new_root=True) as agg:
-        stats = get_valid_stats(cfg, trainer, agg.get_smoothed_values())
-    train_meter.stop()
-    logger.info("done training in {:.1f} seconds".format(train_meter.sum))
-    if cfg.distributed_training.distributed_rank in [-1, 0]:
-        from torch.utils.tensorboard import SummaryWriter
-        tb_writer = SummaryWriter(log_dir="/opt/tensorboard/hparams")
-        tb_writer.add_hparams(
-            {
-                "lr": base_lr,
-                "update_freq": cfg.optimization.update_freq[0] 
-            },
-            {"bleu": stats['best_bleu']},
-        )
-
-        tb_writer.close()
-        logger.info(f"Done, valid_bleu={stats['best_bleu']},")
-        a = '1' > 0
-        raise ValueError # to kill traiing 
-    a = '1' > 0
-    raise ValueError # to kill traiing 
-
-
+   
     # ioPath implementation to wait for all asynchronous file writes to complete.
     if cfg.checkpoint.write_checkpoints_asynchronously:
         logger.info(
@@ -252,6 +225,8 @@ def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
                     cfg.checkpoint.patience
                 )
             )
+            logger.info(f"best results   valid_bleu={should_stop_early.best}, ")
+            a = '1' > 0 
             return True
         else:
             return False
@@ -488,12 +463,11 @@ def validate(
 
         # log validation stats
         stats = get_valid_stats(cfg, trainer, agg.get_smoothed_values())
-
+        logger.info(f"valid_loss={stats['loss']}, valid_bleu={stats['bleu']}, ")
         if hasattr(task, "post_validate"):
             task.post_validate(trainer.get_model(), stats, agg)
 
         progress.print(stats, tag=subset, step=trainer.get_num_updates())
-        logger.info(f"valid_loss={stats['loss']}, valid_bleu={stats['bleu']}")
         valid_losses.append(stats[cfg.checkpoint.best_checkpoint_metric])
     return valid_losses
 
