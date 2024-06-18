@@ -8,7 +8,10 @@ from argparse import Namespace
 
 from fairseq.dataclass.utils import gen_parser_from_dataclass
 from fairseq.optim import FairseqOptimizer
-from deepspeed import DeepSpeedOptimizer
+try:
+    from deepspeed import DeepSpeedOptimizer
+except:
+    DeepSpeedOptimizer = None
 
 
 class FairseqLRScheduler(object):
