@@ -732,7 +732,6 @@ class SequenceGenerator(nn.Module):
         return False
 
 
-
 class EnsembleModel(nn.Module):
     """A wrapper around an ensemble of models."""
 
@@ -750,25 +749,8 @@ class EnsembleModel(nn.Module):
         ):
             self.has_incremental = True
 
-        # Try to use ONNX
-        import os
-        import onnxruntime as ort
-
-        self.use_onnx = False
-        encoder_path = "/home/jovyan/onnx/encoder.onnx"
-        decoder_path = "/home/jovyan/onnx/decoder.onnx"
-
-        if os.path.exists(encoder_path) and os.path.exists(decoder_path):
-            try:
-                self.encoder_session = ort.InferenceSession(encoder_path, providers=['CPUExecutionProvider'])
-                self.decoder_session = ort.InferenceSession(decoder_path, providers=['CPUExecutionProvider'])
-                self.use_onnx = True
-                print(f"Using ONNX models from {encoder_path} and {decoder_path}")
-            except Exception as e:
-                print(f"Error loading ONNX models: {e}")
-                print("Using PyTorch models instead")
-        else:
-            print("ONNX models not found, using PyTorch models")
+    def forward(self):
+        pass
 
     def has_encoder(self):
         return hasattr(self.single_model, "encoder")
@@ -786,53 +768,11 @@ class EnsembleModel(nn.Module):
             + [sys.maxsize]
         )
 
-    def set_decoder_beam_size(self, beam_size):
-        """Set beam size for efficient beamable enc-dec attention."""
-        if beam_size > 1:
-            for model in self.models:
-                if hasattr(model, "set_beam_size"):
-                    model.set_beam_size(beam_size)
-
     @torch.jit.export
     def forward_encoder(self, net_input: Dict[str, Tensor]):
         if not self.has_encoder():
             return None
-
- 
-        if self.use_onnx:
-            # Extract inputs
-            src_tokens = net_input["src_tokens"].cpu().numpy()
-            if "src_lengths" in net_input:
-                src_lengths = net_input["src_lengths"].cpu().numpy()
-            else:
-                src_lengths = np.sum((src_tokens != self.single_model.encoder.padding_idx), axis=1)
-
-            # Run ONNX encoder
-            encoder_outputs = self.encoder_session.run(
-                None,
-                {
-                    'src_tokens': src_tokens
-                }
-            )
-
-            # Convert outputs to PyTorch tensors
-            encoder_out = torch.from_numpy(encoder_outputs[0]).to(net_input["src_tokens"].device)
-            encoder_padding_mask = torch.from_numpy(encoder_outputs[1]).to(net_input["src_tokens"].device)
-
-            # Create encoder output structure expected by Fairseq
-            encoder_output = {
-                "encoder_out": [encoder_out],
-                "encoder_padding_mask": [encoder_padding_mask],
-                "encoder_embedding": [],
-                "encoder_states": [],
-                "src_tokens": [],
-                "src_lengths": [],
-            }
-
-
-            return [encoder_output]
-        else:
-            return [model.encoder.forward_torchscript(net_input) for model in self.models]
+        return [model.encoder.forward_torchscript(net_input) for model in self.models]
 
     @torch.jit.export
     def forward_decoder(
@@ -842,99 +782,64 @@ class EnsembleModel(nn.Module):
         incremental_states: List[Dict[str, Dict[str, Optional[Tensor]]]],
         temperature: float = 1.0,
     ):
-
-        if self.use_onnx:
-            # Extract encoder outputs
-            encoder_out = encoder_outs[0]["encoder_out"][0].cpu().numpy()
-            encoder_padding_mask = encoder_outs[0]["encoder_padding_mask"][0].cpu().numpy() if len(encoder_outs[0]["encoder_padding_mask"]) > 0 else None
-            tokens_np = tokens.cpu().numpy()
-            
-            # Prepare inputs for ONNX decoder
-            decoder_inputs = {
-                'prev_output_tokens': tokens_np,
-                'encoder_out': encoder_out,
-            }
-
-            if encoder_padding_mask is not None:
-                decoder_inputs['encoder_padding_mask'] = encoder_padding_mask
-
-            # Run ONNX decoder
-            decoder_outputs = self.decoder_session.run(None, decoder_inputs)
-
-            # Process outputs
-            logits = torch.from_numpy(decoder_outputs[0]).to(tokens.device)
-            attn = torch.from_numpy(decoder_outputs[1]).to(tokens.device) if len(decoder_outputs) > 1 else None
-
-            # Apply temperature scaling
-            logits = logits.div(temperature)
-
-            # Get normalized probabilities
-            probs = self.single_model.get_normalized_probs((logits, None), log_probs=True, sample=None)
-            probs = probs[:, -1, :]
-
-            # Extract attention if available
-            if attn is not None:
-                attn = attn[:, -1, :]
-            return probs, attn
-        else:
-            log_probs = []
-            avg_attn: Optional[Tensor] = None
-            encoder_out: Optional[Dict[str, List[Tensor]]] = None
-            for i, model in enumerate(self.models):
-                if self.has_encoder():
-                    encoder_out = encoder_outs[i]
-                # decode each model
-                if self.has_incremental_states():
-                    decoder_out = model.decoder.forward(
-                        tokens,
-                        encoder_out=encoder_out,
-                        incremental_state=incremental_states[i],
-                    )
+        log_probs = []
+        avg_attn: Optional[Tensor] = None
+        encoder_out: Optional[Dict[str, List[Tensor]]] = None
+        for i, model in enumerate(self.models):
+            if self.has_encoder():
+                encoder_out = encoder_outs[i]
+            # decode each model
+            if self.has_incremental_states():
+                decoder_out = model.decoder.forward(
+                    tokens,
+                    encoder_out=encoder_out,
+                    incremental_state=incremental_states[i],
+                )
+            else:
+                if hasattr(model, "decoder"):
+                    decoder_out = model.decoder.forward(tokens, encoder_out=encoder_out)
                 else:
-                    if hasattr(model, "decoder"):
-                        decoder_out = model.decoder.forward(tokens, encoder_out=encoder_out)
-                    else:
-                        decoder_out = model.forward(tokens)
+                    decoder_out = model.forward(tokens)
 
-                attn: Optional[Tensor] = None
-                decoder_len = len(decoder_out)
-                if decoder_len > 1 and decoder_out[1] is not None:
-                    if isinstance(decoder_out[1], Tensor):
-                        attn = decoder_out[1]
-                    else:
-                        attn_holder = decoder_out[1]["attn"]
-                        if isinstance(attn_holder, Tensor):
-                            attn = attn_holder
-                        elif attn_holder is not None:
-                            attn = attn_holder[0]
-                    if attn is not None:
-                        attn = attn[:, -1, :]
-
-                decoder_out_tuple = (
-                    decoder_out[0][:, -1:, :].div_(temperature),
-                    None if decoder_len <= 1 else decoder_out[1],
-                )
-                probs = model.get_normalized_probs(
-                    decoder_out_tuple, log_probs=True, sample=None
-                )
-                probs = probs[:, -1, :]
-                if self.models_size == 1:
-                    return probs, attn
-
-                log_probs.append(probs)
+            attn: Optional[Tensor] = None
+            decoder_len = len(decoder_out)
+            if decoder_len > 1 and decoder_out[1] is not None:
+                if isinstance(decoder_out[1], Tensor):
+                    attn = decoder_out[1]
+                else:
+                    attn_holder = decoder_out[1]["attn"]
+                    if isinstance(attn_holder, Tensor):
+                        attn = attn_holder
+                    elif attn_holder is not None:
+                        attn = attn_holder[0]
                 if attn is not None:
-                    if avg_attn is None:
-                        avg_attn = attn
-                    else:
-                        avg_attn.add_(attn)
+                    attn = attn[:, -1, :]
 
-            avg_probs = torch.logsumexp(torch.stack(log_probs, dim=0), dim=0) - math.log(
-                self.models_size
+            decoder_out_tuple = (
+                decoder_out[0][:, -1:, :].div_(temperature),
+                None if decoder_len <= 1 else decoder_out[1],
             )
+            probs = model.get_normalized_probs(
+                decoder_out_tuple, log_probs=True, sample=None
+            )
+            probs = probs[:, -1, :]
+            if self.models_size == 1:
+                return probs, attn
 
-            if avg_attn is not None:
-                avg_attn.div_(self.models_size)
-            return avg_probs, avg_attn
+            log_probs.append(probs)
+            if attn is not None:
+                if avg_attn is None:
+                    avg_attn = attn
+                else:
+                    avg_attn.add_(attn)
+
+        avg_probs = torch.logsumexp(torch.stack(log_probs, dim=0), dim=0) - math.log(
+            self.models_size
+        )
+
+        if avg_attn is not None:
+            avg_attn.div_(self.models_size)
+        return avg_probs, avg_attn
 
     @torch.jit.export
     def reorder_encoder_out(
@@ -942,6 +847,7 @@ class EnsembleModel(nn.Module):
     ):
         """
         Reorder encoder output according to *new_order*.
+
         Args:
             encoder_out: output from the ``forward()`` method
             new_order (LongTensor): desired order
@@ -971,8 +877,6 @@ class EnsembleModel(nn.Module):
             model.decoder.reorder_incremental_state_scripting(
                 incremental_states[i], new_order
             )
-
-
 
 
 class SequenceGeneratorWithAlignment(SequenceGenerator):
