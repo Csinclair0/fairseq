@@ -759,16 +759,13 @@ class EnsembleModel(nn.Module):
         decoder_path = "/models/translation/1/onnx_model/decoder.onnx"
 
         if os.path.exists(encoder_path) and os.path.exists(decoder_path):
-            try:
-                self.encoder_session = ort.InferenceSession(encoder_path, providers=['CPUExecutionProvider'])
-                self.decoder_session = ort.InferenceSession(decoder_path, providers=['CPUExecutionProvider'])
-                self.use_onnx = True
-                print(f"Using ONNX models from {encoder_path} and {decoder_path}")
-            except Exception as e:
-                print(f"Error loading ONNX models: {e}")
-                print("Using PyTorch models instead")
+            self.encoder_session = ort.InferenceSession(encoder_path, providers=['CPUExecutionProvider'])
+            self.decoder_session = ort.InferenceSession(decoder_path, providers=['CPUExecutionProvider'])
+            self.use_onnx = True
+            print(f"Using ONNX models from {encoder_path} and {decoder_path}")
         else:
-            print("ONNX models not found, using PyTorch models")
+            # Raise an error if the ONNX models are not found
+            raise FileNotFoundError(f"ONNX models not found at {encoder_path} and {decoder_path}")
 
     def has_encoder(self):
         return hasattr(self.single_model, "encoder")
