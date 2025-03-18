@@ -755,8 +755,8 @@ class EnsembleModel(nn.Module):
         import onnxruntime as ort
 
         self.use_onnx = False
-        encoder_path = "/home/jovyan/onnx/encoder.onnx"
-        decoder_path = "/home/jovyan/onnx/decoder.onnx"
+        encoder_path = "/models/translation/1/onnx_model/encoder.onnx"
+        decoder_path = "/models/translation/1/onnx_model/decoder.onnx"
 
         if os.path.exists(encoder_path) and os.path.exists(decoder_path):
             try:
