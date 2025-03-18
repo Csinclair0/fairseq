@@ -755,8 +755,8 @@ class EnsembleModel(nn.Module):
         import onnxruntime as ort
 
         self.use_onnx = False
-        encoder_path = "/models/translation/1/onnx_model/encoder.onnx"
-        decoder_path = "/models/translation/1/onnx_model/decoder.onnx"
+        encoder_path = "/mnt/models/translation/1/onnx_model/encoder.onnx"
+        decoder_path = "/mnt/models/translation/1/onnx_model/decoder.onnx"
 
         if os.path.exists(encoder_path) and os.path.exists(decoder_path):
             self.encoder_session = ort.InferenceSession(encoder_path, providers=['CPUExecutionProvider'])
