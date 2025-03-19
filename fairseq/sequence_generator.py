@@ -14,6 +14,8 @@ from fairseq.data import data_utils
 from fairseq.models import FairseqIncrementalDecoder
 from torch import Tensor
 from fairseq.ngram_repeat_block import NGramRepeatBlock
+import os
+import onnxruntime as ort
 
 
 class SequenceGenerator(nn.Module):
@@ -751,12 +753,10 @@ class EnsembleModel(nn.Module):
             self.has_incremental = True
 
         # Try to use ONNX
-        import os
-        import onnxruntime as ort
-
         self.use_onnx = False
-        encoder_path = "/mnt/models/translation/1/onnx_model/encoder.onnx"
-        decoder_path = "/mnt/models/translation/1/onnx_model/decoder.onnx"
+        # Get paths from environment variables
+        encoder_path = os.environ["FAIRSEQ_ONNX_ENCODER_PATH"]
+        decoder_path = os.environ["FAIRSEQ_ONNX_DECODER_PATH"]
 
         if os.path.exists(encoder_path) and os.path.exists(decoder_path):
             self.encoder_session = ort.InferenceSession(encoder_path, providers=['CPUExecutionProvider'])
@@ -764,7 +764,6 @@ class EnsembleModel(nn.Module):
             self.use_onnx = True
             print(f"Using ONNX models from {encoder_path} and {decoder_path}")
         else:
-            # Raise an error if the ONNX models are not found
             raise FileNotFoundError(f"ONNX models not found at {encoder_path} and {decoder_path}")
 
     def has_encoder(self):
