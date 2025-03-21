@@ -759,10 +759,29 @@ class EnsembleModel(nn.Module):
         decoder_path = os.environ["FAIRSEQ_ONNX_DECODER_PATH"]
 
         if os.path.exists(encoder_path) and os.path.exists(decoder_path):
-            self.encoder_session = ort.InferenceSession(encoder_path, providers=['CPUExecutionProvider'])
-            self.decoder_session = ort.InferenceSession(decoder_path, providers=['CPUExecutionProvider'])
+            # Get thread configuration from environment variables or use defaults
+            intra_threads = int(os.environ.get("FAIRSEQ_ONNX_INTRA_THREADS", "16"))
+            inter_threads = int(os.environ.get("FAIRSEQ_ONNX_INTER_THREADS", "1"))
+
+            # Configure session options with thread control
+            session_options = ort.SessionOptions()
+            session_options.intra_op_num_threads = intra_threads
+            session_options.inter_op_num_threads = inter_threads
+            session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+
+            self.encoder_session = ort.InferenceSession(
+                encoder_path,
+                sess_options=session_options,
+                providers=['CPUExecutionProvider']
+            )
+            self.decoder_session = ort.InferenceSession(
+                decoder_path,
+                sess_options=session_options,
+                providers=['CPUExecutionProvider']
+            )
             self.use_onnx = True
             print(f"Using ONNX models from {encoder_path} and {decoder_path}")
+            print(f"ONNX thread configuration: intra_threads={intra_threads}, inter_threads={inter_threads}")
         else:
             raise FileNotFoundError(f"ONNX models not found at {encoder_path} and {decoder_path}")
 
