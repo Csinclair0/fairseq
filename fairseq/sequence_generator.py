@@ -784,6 +784,7 @@ class EnsembleModel(nn.Module):
             print(f"ONNX thread configuration: intra_threads={intra_threads}, inter_threads={inter_threads}")
         else:
             raise FileNotFoundError(f"ONNX models not found at {encoder_path} and {decoder_path}")
+        self.use_onnx = False
 
     def has_encoder(self):
         return hasattr(self.single_model, "encoder")
