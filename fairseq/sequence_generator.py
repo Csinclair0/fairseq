@@ -4,17 +4,21 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
-import sys
 from typing import Dict, List, Optional
+import sys
 
 import torch
 import torch.nn as nn
-from torch import Tensor
-
 from fairseq import search, utils
 from fairseq.data import data_utils
 from fairseq.models import FairseqIncrementalDecoder
+from torch import Tensor
 from fairseq.ngram_repeat_block import NGramRepeatBlock
+from openvino.runtime import Core
+import openvino.runtime as ov
+import time
+from typing import Dict, List, Optional, Any, Union
+import os
 
 
 class SequenceGenerator(nn.Module):
@@ -81,7 +85,6 @@ class SequenceGenerator(nn.Module):
         self.beam_size = beam_size
         # the max beam size is the dictionary size - 1, since we never select pad
         self.beam_size = min(beam_size, self.vocab_size - 1)
-        self.model.set_decoder_beam_size(self.beam_size)
         self.max_len_a = max_len_a
         self.max_len_b = max_len_b
         self.min_len = min_len
@@ -204,8 +207,14 @@ class SequenceGenerator(nn.Module):
                 for i in range(self.model.models_size)
             ],
         )
+        # Add OpenVINO incremental states
+        incremental_states_ov = None
+        if hasattr(self.model, "use_openvino") and self.model.use_openvino:
+            incremental_states_ov = [{}]
+
+
         net_input = sample["net_input"]
-        #print(net_input)
+
         if "src_tokens" in net_input:
             src_tokens = net_input["src_tokens"]
             # length of the source text being the character length except EndOfSentence and pad
@@ -257,11 +266,9 @@ class SequenceGenerator(nn.Module):
             self.min_len <= max_len
         ), "min_len cannot be larger than max_len, please adjust these!"
         # compute the encoder output for each beam
-        with torch.autograd.profiler.record_function("EnsembleModel: forward_encoder"):
+        with torch.profiler.record_function("EnsembleModel: forward_encoder"):
             encoder_outs = self.model.forward_encoder(net_input)
-        #print(encoder_outs[0])
-        #print(f"transposed {encoder_outs[0]['encoder_out'][0].shape}")
-        #print(encoder_outs[0]['encoder_embedding'][0].shape)
+
         # placeholder of indices for bsz * beam_size to hold tokens and accumulative scores
         new_order = torch.arange(bsz).view(-1, 1).repeat(1, beam_size).view(-1)
         new_order = new_order.to(src_tokens.device).long()
@@ -337,7 +344,7 @@ class SequenceGenerator(nn.Module):
                 encoder_outs = self.model.reorder_encoder_out(
                     encoder_outs, reorder_state
                 )
-            with torch.autograd.profiler.record_function(
+            with torch.profiler.record_function(
                 "EnsembleModel: forward_decoder"
             ):
                 lprobs, avg_attn_scores = self.model.forward_decoder(
@@ -346,7 +353,7 @@ class SequenceGenerator(nn.Module):
                     incremental_states,
                     self.temperature,
                 )
-            #print(lprobs.shape)
+
             if self.lm_model is not None:
                 lm_out = self.lm_model(tokens[:, : step + 1])
                 probs = self.lm_model.get_normalized_probs(
@@ -354,7 +361,6 @@ class SequenceGenerator(nn.Module):
                 )
                 probs = probs[:, -1, :] * self.lm_weight
                 lprobs += probs
-
 
             lprobs[lprobs != lprobs] = torch.tensor(-math.inf).to(lprobs)
 
@@ -668,7 +674,7 @@ class SequenceGenerator(nn.Module):
                 cum_unfin.append(prev)
         cum_fin_tensor = torch.tensor(cum_unfin, dtype=torch.int).to(bbsz_idx)
 
-        unfin_idx = torch.div(bbsz_idx, beam_size, rounding_mode="trunc")
+        unfin_idx = bbsz_idx // beam_size
         sent = unfin_idx + torch.index_select(cum_fin_tensor, 0, unfin_idx)
 
         # Create a set of "{sent}{unfin_idx}", where
@@ -737,9 +743,12 @@ class SequenceGenerator(nn.Module):
         return False
 
 
+
+from typing import Dict, List, Optional, Any, Union
+
 class EnsembleModel(nn.Module):
     """A wrapper around an ensemble of models."""
-
+    
     def __init__(self, models):
         super().__init__()
         self.models_size = len(models)
@@ -754,8 +763,66 @@ class EnsembleModel(nn.Module):
         ):
             self.has_incremental = True
 
-    def forward(self):
-        pass
+        # Initialize flags
+        self.use_openvino = False
+        self.save_onnx = False
+        
+        # Try to use OpenVINO for acceleration
+        try:
+            from openvino.runtime import Core
+            import openvino.runtime as ov
+            
+            # Get paths from environment variables
+            encoder_openvino_path = os.environ.get("FAIRSEQ_OPENVINO_ENCODER_PATH")
+            decoder_openvino_path = os.environ.get("FAIRSEQ_OPENVINO_DECODER_PATH")
+            
+            # Get thread configuration from environment variables or use defaults
+            intra_threads = int(os.environ.get("FAIRSEQ_OPENVINO_INTRA_THREADS", "4"))
+            inter_threads = int(os.environ.get("FAIRSEQ_OPENVINO_INTER_THREADS", "1"))
+            
+            if encoder_openvino_path and decoder_openvino_path and os.path.exists(encoder_openvino_path) and os.path.exists(decoder_openvino_path):
+                # Configure Core with thread settings
+                self.ie = Core()
+                
+                # Set CPU configuration properties
+                cpu_config = {
+                    "NUM_STREAMS": inter_threads
+                }
+
+                # Set the inference threads directly on the core, not in config
+                self.ie.set_property("CPU", {"INFERENCE_NUM_THREADS": intra_threads})
+                
+                # Read and compile models
+                self.encoder_model = self.ie.read_model(model=encoder_openvino_path)
+                self.encoder_compiled_model = self.ie.compile_model(model=self.encoder_model, 
+                                                                device_name="CPU", 
+                                                                config=cpu_config)
+                self.encoder_request = self.encoder_compiled_model.create_infer_request()
+                
+                self.decoder_model = self.ie.read_model(model=decoder_openvino_path)
+                self.decoder_compiled_model = self.ie.compile_model(model=self.decoder_model, 
+                                                                device_name="CPU",
+                                                                config=cpu_config)
+                self.decoder_request = self.decoder_compiled_model.create_infer_request()
+                
+                self.use_openvino = True
+                print(f"Using OpenVINO models from {encoder_openvino_path} and {decoder_openvino_path}")
+                print(f"OpenVINO thread configuration: intra_threads={intra_threads}, inter_threads={inter_threads}")
+                
+                # Print model input and output information for debugging if needed
+                # print("== OpenVINO Model Information ==")
+                # print("Encoder Inputs:", [input_node.get_any_name() for input_node in self.encoder_model.inputs])
+                # print("Encoder Outputs:", [output_node.get_any_name() for output_node in self.encoder_model.outputs])
+                # print("Decoder Inputs:", [input_node.get_any_name() for input_node in self.decoder_model.inputs])
+                # print("Decoder Outputs:", [output_node.get_any_name() for output_node in self.decoder_model.outputs])
+            else:
+                raise FileNotFoundError(f"OpenVINO models not found at {encoder_openvino_path} and {decoder_openvino_path}")
+        except Exception as e:
+            self.use_openvino = False
+            print(f"Error loading OpenVINO models: {e}")
+            print("Falling back to PyTorch models")
+
+
 
     def has_encoder(self):
         return hasattr(self.single_model, "encoder")
@@ -780,11 +847,239 @@ class EnsembleModel(nn.Module):
                 if hasattr(model, "set_beam_size"):
                     model.set_beam_size(beam_size)
 
+    def openvino_encoder_inference(self, net_input):
+        """Run encoder inference with OpenVINO"""
+        # Prepare input (only src_tokens is needed based on model inputs)
+        src_tokens = net_input["src_tokens"].cpu().numpy()
+        
+        # Create input dictionary with only src_tokens
+        input_dict = {'src_tokens': src_tokens}
+        
+        # Run inference
+        encoder_result = self.encoder_compiled_model(input_dict)
+        
+        # Get output names and print for debugging
+        output_names = [output.get_any_name() for output in self.encoder_compiled_model.outputs]
+        #print("OpenVINO encoder output names:", output_names)
+        
+        # Extract outputs based on name patterns
+        encoder_out = None
+        padding_mask = None
+        
+        for output_name in output_names:
+            if 'encoder_out' in output_name:
+                encoder_out = encoder_result[output_name]
+            elif 'padding_mask' in output_name or 'Equal_output' in output_name:
+                padding_mask = encoder_result[output_name]
+        
+        # If we couldn't find outputs by name, use index-based access
+        if encoder_out is None:
+            encoder_out = encoder_result[output_names[0]]
+        
+        if padding_mask is None and len(output_names) > 1:
+            padding_mask = encoder_result[output_names[1]]
+        
+        # Create the encoder output dictionary in the expected format
+        encoder_result_dict = {
+            'encoder_out': [torch.from_numpy(encoder_out).to(net_input["src_tokens"].device)],
+            'encoder_padding_mask': [torch.from_numpy(padding_mask).to(net_input["src_tokens"].device)] if padding_mask is not None else [],
+            'encoder_embedding': [],
+            'encoder_states': [],
+            'fc_results': [],
+            'src_tokens': [],
+            'src_lengths': []
+        }
+        
+        return encoder_result_dict
+
+    def openvino_decoder_inference(self, tokens, encoder_out, incremental_state=None):
+        """Run decoder inference with OpenVINO"""
+        # Prepare inputs
+        tokens_np = tokens.cpu().numpy()
+        
+        # Create input dictionary based on the actual model inputs
+        input_dict = {'prev_output_tokens': tokens_np}
+        
+        # Check if encoder outputs exist and add them to inputs
+        if "encoder_out" in encoder_out and len(encoder_out["encoder_out"]) > 0:
+            input_dict['encoder_out'] = encoder_out["encoder_out"][0].cpu().numpy()
+        
+        if "encoder_padding_mask" in encoder_out and len(encoder_out["encoder_padding_mask"]) > 0:
+            input_dict['encoder_padding_mask'] = encoder_out["encoder_padding_mask"][0].cpu().numpy()
+        
+        # Add incremental state if it exists
+        if incremental_state is not None and len(incremental_state) > 0:
+            for key, value in incremental_state.items():
+                input_dict[key] = value
+        
+        # Print decoder inputs for debugging
+        #print("OpenVINO decoder input keys:", list(input_dict.keys()))
+        
+        # Run inference
+        decoder_result = self.decoder_compiled_model(input_dict)
+        
+        # Get output names and print for debugging
+        output_names = [output.get_any_name() for output in self.decoder_compiled_model.outputs]
+        #print("OpenVINO decoder output names:", output_names)
+        
+        # Extract outputs based on name patterns
+        decoder_out = None
+        attn = None
+        
+        for output_name in output_names:
+            if 'decoder_out' in output_name:
+                decoder_out = decoder_result[output_name]
+            elif 'attn' in output_name:
+                attn = decoder_result[output_name]
+        
+        # If we couldn't find outputs by name, use index-based access
+        if decoder_out is None:
+            decoder_out = decoder_result[output_names[0]]
+        
+        if attn is None and len(output_names) > 1:
+            attn = decoder_result[output_names[1]]
+        
+        # Create result with appropriate structure
+        decoder_result_list = [
+            torch.from_numpy(decoder_out).to(tokens.device),
+            {"attn": [torch.from_numpy(attn).to(tokens.device)] if attn is not None else None}
+        ]
+        
+        # Update incremental state if needed
+        if incremental_state is not None:
+            # Clear previous values
+            incremental_state.clear()
+            
+            # Look for keys/values in output names
+            for i, output_name in enumerate(output_names[2:], 2):  # Skip the first two (decoder_out and attn)
+                if 'key' in output_name or 'value' in output_name:
+                    incremental_state[output_name] = decoder_result[output_name]
+        
+        return decoder_result_list
+
     @torch.jit.export
     def forward_encoder(self, net_input: Dict[str, Tensor]):
         if not self.has_encoder():
             return None
-        return [model.encoder.forward_torchscript(net_input) for model in self.models]
+        
+        encoder_start_time = time.perf_counter()
+        
+        if self.save_onnx:
+            # Export the encoder to ONNX if requested
+            model = self.models[0]
+            model.prepare_for_onnx_export_()
+            model.eval()
+            torch.onnx.export(model.encoder, (net_input),
+                        self.FILE_PATH+"/../onnx_models/encoder_xiping.onnx",
+                        input_names=["src_tokens","src_lengths"],
+                        dynamic_axes={'src_tokens' : {0:"batch_size", 1:"src_lengths"},
+                                      'src_lengths' : {0:"src_lengths"},
+                                      },
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
+                        do_constant_folding=False,
+                        verbose=True
+                        )
+            print("== Export Encoder onnx success ==")
+            
+        if self.use_openvino:
+            # Use OpenVINO for encoder inference
+            encoder_result_dict = self.openvino_encoder_inference(net_input)
+            encoder_result = [encoder_result_dict]
+            #encoder_time = time.perf_counter() - encoder_start_time
+            #print(f"==OpenVINO encoder_time=={encoder_time*1000:.2f} ms")
+        elif self.use_onnx:
+            # Use ONNX for encoder inference
+            encoder_output = self.onnx_encoder_inference(net_input)
+            encoder_result = [encoder_output]
+            #encoder_time = time.perf_counter() - encoder_start_time
+            #print(f"==ONNX encoder_time=={encoder_time*1000:.2f} ms")
+        else:
+            # Use PyTorch for encoder inference
+            encoder_result = [model.encoder.forward_torchscript(net_input) for model in self.models]
+            #encoder_time = time.perf_counter() - encoder_start_time
+            #print(f"==PyTorch encoder_time=={encoder_time*1000:.2f} ms")
+            
+        return encoder_result
+
+    def onnx_encoder_inference(self, net_input):
+        """Run encoder inference with ONNX"""
+        import numpy as np
+        
+        # Prepare input
+        src_tokens = net_input["src_tokens"].cpu().numpy()
+        if "src_lengths" in net_input:
+            src_lengths = net_input["src_lengths"].cpu().numpy()
+        else:
+            src_lengths = np.sum((src_tokens != self.single_model.encoder.padding_idx), axis=1)
+        
+        # Run ONNX encoder
+        encoder_outputs = self.encoder_session.run(
+            None, 
+            {
+                'src_tokens': src_tokens
+            }
+        )
+        
+        # Convert outputs to PyTorch tensors
+        encoder_out = torch.from_numpy(encoder_outputs[0]).to(net_input["src_tokens"].device)
+        encoder_padding_mask = torch.from_numpy(encoder_outputs[1]).to(net_input["src_tokens"].device)
+        
+        # Create encoder output structure expected by Fairseq
+        encoder_output = {
+            "encoder_out": [encoder_out],
+            "encoder_padding_mask": [encoder_padding_mask],
+            "encoder_embedding": [],
+            "encoder_states": [],
+            "src_tokens": [],
+            "src_lengths": [],
+        }
+        
+        return encoder_output
+
+    def onnx_decoder_inference(self, tokens, encoder_out, incremental_states=None):
+        """Run decoder inference with ONNX"""
+        # Extract encoder outputs
+        encoder_out_tensor = encoder_out["encoder_out"][0].cpu().numpy()
+        encoder_padding_mask = encoder_out["encoder_padding_mask"][0].cpu().numpy() if len(encoder_out["encoder_padding_mask"]) > 0 else None
+        tokens_np = tokens.cpu().numpy()
+        
+        # Prepare inputs for ONNX decoder
+        decoder_inputs = {
+            'prev_output_tokens': tokens_np,
+            'encoder_out': encoder_out_tensor,
+        }
+        
+        if encoder_padding_mask is not None:
+            decoder_inputs['encoder_padding_mask'] = encoder_padding_mask
+        
+        # Add incremental states if they exist
+        if incremental_states is not None and len(incremental_states) > 0:
+            for k, v in incremental_states.items():
+                decoder_inputs[k] = v['prev_key'].cpu().numpy() if 'prev_key' in v else v.cpu().numpy()
+        
+        # Run ONNX decoder
+        decoder_outputs = self.decoder_session.run(None, decoder_inputs)
+        
+        # Process outputs
+        logits = torch.from_numpy(decoder_outputs[0]).to(tokens.device)
+        attn = torch.from_numpy(decoder_outputs[1]).to(tokens.device) if len(decoder_outputs) > 1 else None
+        
+        # Update incremental states if needed
+        if incremental_states is not None and len(decoder_outputs) > 2:
+            idx = 2
+            while idx < len(decoder_outputs) and idx + 1 < len(decoder_outputs):
+                key_idx = idx
+                value_idx = idx + 1
+                layer_idx = (idx - 2) // 2
+                
+                if layer_idx not in incremental_states:
+                    incremental_states[layer_idx] = {}
+                
+                incremental_states[layer_idx]['prev_key'] = torch.from_numpy(decoder_outputs[key_idx]).to(tokens.device)
+                incremental_states[layer_idx]['prev_value'] = torch.from_numpy(decoder_outputs[value_idx]).to(tokens.device)
+                idx += 2
+        
+        return logits, attn
 
     @torch.jit.export
     def forward_decoder(
@@ -792,41 +1087,136 @@ class EnsembleModel(nn.Module):
         tokens,
         encoder_outs: List[Dict[str, List[Tensor]]],
         incremental_states: List[Dict[str, Dict[str, Optional[Tensor]]]],
+        incremental_states_ov: Optional[List[Dict[str, Union[bytes, Tensor]]]] = None,
         temperature: float = 1.0,
     ):
+        """Forward decoder with support for OpenVINO, ONNX, and PyTorch backends."""
         log_probs = []
         avg_attn: Optional[Tensor] = None
-        encoder_out: Optional[Dict[str, List[Tensor]]] = None
-
+        
+        # Initialize OpenVINO incremental states if needed
+        if self.use_openvino:
+            if incremental_states_ov is None or not isinstance(incremental_states_ov, list):
+                incremental_states_ov = [{}] * self.models_size
+            # Ensure we have enough states for all models
+            while len(incremental_states_ov) < self.models_size:
+                incremental_states_ov.append({})
+        
         for i, model in enumerate(self.models):
             if self.has_encoder():
                 encoder_out = encoder_outs[i]
-            # decode each model
-            if self.has_incremental_states():
-                decoder_out = model.decoder.forward(
+            
+            if self.save_onnx:
+                # Export the decoder to ONNX if requested
+                model.prepare_for_onnx_export_()
+                
+                inputs = {}
+                input_names = ["tokens"]
+                dynamic_axes = {'tokens': {0: "batch_size", 1: "seq_len"}}
+                
+                output_names = ["output", "attn"]
+                for j in range(4):
+                    output_names.append(f"inner_status_{j}")
+                
+                if len(incremental_states[i]) > 0:
+                    for j, key in enumerate(incremental_states[i].keys()):
+                        pk = f"prev_key_{j}"
+                        pv = f"prev_value_{j}"
+                        inputs[pk] = incremental_states[i][key]["prev_key"]
+                        inputs[pv] = incremental_states[i][key]["prev_value"]
+                        input_names.append(pk)
+                        input_names.append(pv)
+                        dynamic_axes[pk] = {0: "batch_size", 2: "seq_len"}
+                        dynamic_axes[pv] = {0: "batch_size", 2: "seq_len"}
+                
+                # Add outputs for keys and values
+                for j in range(6):
+                    pk = f"key_{j}"
+                    pv = f"value_{j}"
+                    output_names.append(pk)
+                    output_names.append(pv)
+                    dynamic_axes[pk] = {0: "batch_size", 2: "seq_len"}
+                    dynamic_axes[pv] = {0: "batch_size", 2: "seq_len"}
+                
+                inputs["encoder_out"] = encoder_out["encoder_out"][0]
+                input_names.append("encoder_out")
+                dynamic_axes["encoder_out"] = {0: "batch_size", 1: "seq_len"}
+                
+                if "encoder_padding_mask" in encoder_out and len(encoder_out["encoder_padding_mask"]) > 0:
+                    inputs["encoder_padding_mask"] = encoder_out["encoder_padding_mask"][0]
+                    input_names.append("encoder_padding_mask")
+                    dynamic_axes["encoder_padding_mask"] = {0: "batch_size", 1: "seq_len"}
+                
+                input_data = (tokens, inputs, {"ignore_param": "ignore_p"})
+                
+                torch.onnx.export(model.decoder, input_data,
+                    f"{self.FILE_PATH}/../onnx_models/decoder_{i}_xiping.onnx",
+                    input_names=input_names,
+                    output_names=output_names,
+                    dynamic_axes=dynamic_axes,
+                    verbose=True
+                )
+                print(f"== Export Decoder {i} onnx success ==")
+            
+            # Actual inference based on the selected engine
+            decoder_start_time = time.perf_counter()
+            if self.use_openvino:
+                # Use OpenVINO for decoder inference
+                decoder_out = self.openvino_decoder_inference(
                     tokens,
                     encoder_out=encoder_out,
-                    incremental_state=incremental_states[i],
+                    incremental_state=incremental_states_ov[i] if incremental_states_ov is not None else {}
                 )
+                decoder_time = time.perf_counter() - decoder_start_time
+                #print(f"==OpenVINO decoder_time=={decoder_time*1000:.2f} ms")
+            elif self.use_onnx:
+                # Use ONNX for decoder inference
+                logits, attn_tensor = self.onnx_decoder_inference(
+                    tokens,
+                    encoder_out=encoder_out,
+                    incremental_states=incremental_states[i] if self.has_incremental else None
+                )
+                
+                # Format outputs to match PyTorch format
+                decoder_out = [
+                    logits,
+                    {"attn": [attn_tensor]} if attn_tensor is not None else None
+                ]
+                decoder_time = time.perf_counter() - decoder_start_time
+                #print(f"==ONNX decoder_time=={decoder_time*1000:.2f} ms")
             else:
-                if hasattr(model, "decoder"):
-                    decoder_out = model.decoder.forward(tokens, encoder_out=encoder_out)
+                # Use PyTorch for decoder inference
+                if self.has_incremental_states():
+                    decoder_out = model.decoder.forward(
+                        tokens,
+                        encoder_out=encoder_out,
+                        incremental_state=incremental_states[i],
+                    )
                 else:
-                    decoder_out = model.forward(tokens)
-
+                    if hasattr(model, "decoder"):
+                        decoder_out = model.decoder.forward(tokens, encoder_out=encoder_out)
+                    else:
+                        decoder_out = model.forward(tokens)       
+                
+                decoder_time = time.perf_counter() - decoder_start_time
+                #print(f"==PyTorch decoder_time=={decoder_time*1000:.2f} ms")
+            
+            # Process decoder output
             attn: Optional[Tensor] = None
             decoder_len = len(decoder_out)
             if decoder_len > 1 and decoder_out[1] is not None:
                 if isinstance(decoder_out[1], Tensor):
                     attn = decoder_out[1]
                 else:
-                    attn_holder = decoder_out[1]["attn"]
+                    attn_holder = decoder_out[1]["attn"] if "attn" in decoder_out[1] else None
                     if isinstance(attn_holder, Tensor):
                         attn = attn_holder
                     elif attn_holder is not None:
                         attn = attn_holder[0]
                 if attn is not None:
                     attn = attn[:, -1, :]
+            
+            # Apply temperature scaling and get probabilities
             decoder_out_tuple = (
                 decoder_out[0][:, -1:, :].div_(temperature),
                 None if decoder_len <= 1 else decoder_out[1],
@@ -835,22 +1225,25 @@ class EnsembleModel(nn.Module):
                 decoder_out_tuple, log_probs=True, sample=None
             )
             probs = probs[:, -1, :]
+            
             if self.models_size == 1:
                 return probs, attn
-
+            
             log_probs.append(probs)
             if attn is not None:
                 if avg_attn is None:
                     avg_attn = attn
                 else:
                     avg_attn.add_(attn)
-
+        
+        # Ensemble model handling (average probabilities)
         avg_probs = torch.logsumexp(torch.stack(log_probs, dim=0), dim=0) - math.log(
             self.models_size
         )
-
+        
         if avg_attn is not None:
-            avg_attn.div_(self.models_size)
+            avg_attn.div_(self.models_size)    
+        
         return avg_probs, avg_attn
 
     @torch.jit.export
@@ -859,11 +1252,9 @@ class EnsembleModel(nn.Module):
     ):
         """
         Reorder encoder output according to *new_order*.
-
         Args:
             encoder_out: output from the ``forward()`` method
             new_order (LongTensor): desired order
-
         Returns:
             *encoder_out* rearranged according to *new_order*
         """
@@ -889,6 +1280,8 @@ class EnsembleModel(nn.Module):
             model.decoder.reorder_incremental_state_scripting(
                 incremental_states[i], new_order
             )
+
+
 
 
 class SequenceGeneratorWithAlignment(SequenceGenerator):
