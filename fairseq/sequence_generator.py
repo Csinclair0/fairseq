@@ -766,6 +766,7 @@ class EnsembleModel(nn.Module):
         # Initialize flags
         self.use_openvino = False
         self.save_onnx = False
+        self.use_onnx = False
         
         # Try to use OpenVINO for acceleration
         try:
